@@ -198,12 +198,18 @@ def _apps() -> list[dict]:
     return r if isinstance(r, list) else []
 
 
+def _autodeploy(ap: dict):
+    """El listado no trae «settings»; si falta, se pide el detalle de la app."""
+    ajustes = ap.get("settings") or (api("GET", f"/applications/{ap['uuid']}") or {}).get("settings") or {}
+    return ajustes.get("is_auto_deploy_enabled")
+
+
 def cmd_estado(_a):
     apps = []
     for ap in _apps():
         apps.append({"nombre": ap.get("name"), "uuid": ap.get("uuid"), "estado": ap.get("status"),
                      "dominios": ap.get("fqdn"), "repo": ap.get("git_repository"), "rama": ap.get("git_branch"),
-                     "autodeploy": ap.get("is_auto_deploy_enabled")})
+                     "autodeploy": _autodeploy(ap)})
     dbs = [{"nombre": d.get("name"), "uuid": d.get("uuid"), "tipo": d.get("database_type"), "estado": d.get("status"),
             "publica": d.get("is_public")} for d in (api("GET", "/databases") or [])]
     return {"ok": True, "apps": apps, "bases_de_datos": dbs, "registro_local": sorted(registro())}
@@ -340,8 +346,22 @@ def cmd_variables_fichero(a):
 def cmd_variables(a):
     app = resolver_app(a.app)
     envs = api("GET", f"/applications/{app}/envs") or []
+    # Coolify crea una copia de cada variable para los despliegues de preview: no se muestran
     return {"ok": True, "variables": [{"clave": e.get("key"), "build": e.get("is_buildtime"),
-                                       "runtime": e.get("is_runtime"), "preview": e.get("is_preview")} for e in envs]}
+                                       "runtime": e.get("is_runtime")} for e in envs if not e.get("is_preview")]}
+
+
+def cmd_borrar_variable(a):
+    """Borra una variable (y su copia de preview). Exige --confirmado."""
+    if not a.confirmado:
+        raise Error("Borrar una variable necesita --confirmado (pregunta antes al usuario).")
+    app = resolver_app(a.app)
+    envs = [e for e in (api("GET", f"/applications/{app}/envs") or []) if e.get("key") == a.clave]
+    if not envs:
+        raise Error(f"La app no tiene la variable {a.clave}")
+    for e in envs:
+        api("DELETE", f"/applications/{app}/envs/{e['uuid']}")
+    return {"ok": True, "clave": a.clave, "borradas": len(envs)}
 
 
 def cmd_desplegar(a):
@@ -472,6 +492,9 @@ def parser() -> argparse.ArgumentParser:
     c.set_defaults(f=cmd_variable)
 
     c = s.add_parser("variables"); c.add_argument("app"); c.set_defaults(f=cmd_variables)
+
+    c = s.add_parser("borrar-variable"); c.add_argument("app"); c.add_argument("clave")
+    c.add_argument("--confirmado", action="store_true"); c.set_defaults(f=cmd_borrar_variable)
 
     c = s.add_parser("variables-fichero", help="sube KEY=valor de un fichero (los valores no salen por pantalla)")
     c.add_argument("app"); c.add_argument("fichero"); c.set_defaults(f=cmd_variables_fichero)

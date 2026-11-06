@@ -171,3 +171,8 @@ def test_todas_las_plantillas_se_rellenan_con_los_valores_por_defecto():
     v = preparar.valores({"stack": {"puerto": 8000}}, {})
     for p in (SCRIPTS.parent / "plantillas").glob("*.Dockerfile"):
         assert "{{" not in preparar.rellenar(p.read_text(), v), p.name
+
+
+def test_borrar_variable_exige_confirmacion(config):
+    with pytest.raises(coolify.Error):
+        coolify.cmd_borrar_variable(argparse.Namespace(app="x", clave="A", confirmado=False))

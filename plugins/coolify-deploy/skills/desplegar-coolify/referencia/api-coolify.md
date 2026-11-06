@@ -1,7 +1,8 @@
 # API de Coolify usada por la skill
 
 Base: `<url>/api/v1` · Autenticación: `Authorization: Bearer <token>` · Comprobado con la especificación OpenAPI de
-Coolify **v4.6.0**. El token necesita los permisos `read`, `write` y `deploy` (no hace falta `root` ni `read:sensitive`).
+Coolify **v4.6.0**. El token necesita los permisos `read`, `write`, `deploy` y `delete` (no hace falta `root` ni `read:sensitive`).
+`delete` es un permiso aparte: sin él, todos los `DELETE` devuelven 403 «Missing required permissions: delete».
 
 | Orden de `coolify.py` | Método y ruta |
 |---|---|
@@ -12,7 +13,7 @@ Coolify **v4.6.0**. El token necesita los permisos `read`, `write` y `deploy` (n
 | `crear-proyecto` | `GET /projects`, `POST /projects` |
 | `crear-app` | `POST /applications/private-github-app` (`build_pack=dockerfile`, `ports_exposes`, `domains`, `limits_*`, `is_auto_deploy_enabled`, `health_check_enabled=false`, `instant_deploy=false`) |
 | `crear-postgres` | `POST /databases/postgresql` (`is_public=false`, `instant_deploy=true`; usuario y contraseña generados en local) |
-| `variable`, `variables-fichero` | `GET/POST/PATCH /applications/{uuid}/envs` (`is_literal`, `is_buildtime`, `is_runtime`, `is_shown_once`) |
+| `variable`, `variables-fichero`, `borrar-variable` | `GET/POST/PATCH/DELETE /applications/{uuid}/envs` (`is_literal`, `is_buildtime`, `is_runtime`, `is_shown_once`) |
 | `variables` | `GET /applications/{uuid}/envs` (solo se muestran nombres) |
 | `desplegar` | `POST /deploy?uuid=…&force=…` |
 | `esperar` | `GET /deployments/{uuid}` (estados finales: `finished`, `failed`, `cancelled-by-user`) |

@@ -40,7 +40,7 @@ Django, Laravel/Symfony ni SSR de Nuxt/Astro/SvelteKit.
 
 1. **Activa la API** en Coolify: *Settings → Access and API → API Access*, y en *Allowed IPs* pon tu red
    (p. ej. `192.168.1.0/24`).
-2. **Crea un token** en *Keys & Tokens → API tokens* con los permisos `read`, `write` y `deploy`
+2. **Crea un token** en *Keys & Tokens → API tokens* con los permisos `read`, `write`, `deploy` y `delete`
    (no hace falta `root` ni `read:sensitive`).
 3. **Guárdalo en el Llavero** (el token no se escribe en ningún fichero ni pasa por el chat):
    ```bash

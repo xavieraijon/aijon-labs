@@ -119,7 +119,7 @@ Resume en pocas líneas: URL, qué se creó (proyecto, app, BD), resultado de la
 | `estado` | `C estado` → tabla: app, estado, dominio, último despliegue (`C ultimo-despliegue <app>` si hace falta) |
 | `logs <app>` | `C logs <app>` y `C ultimo-despliegue <app>`; resume errores |
 | `actualizar <app>` | Commit local si hay cambios → push por el usuario → `C ultimo-despliegue <app>` hasta ver el nuevo commit → `C esperar …` → `V …`. Si el autodeploy está desactivado: `C desplegar <app>` |
-| `variables <app>` | `C variables <app>` (solo nombres). Para cambiar: editar `secretos/<app>.env` (el usuario) → `C variables-fichero …` → `C desplegar <app>` |
+| `variables <app>` | `C variables <app>` (solo nombres). Para cambiar: editar `secretos/<app>.env` (el usuario) → `C variables-fichero …` → `C desplegar <app>`. Para borrar una: confirmar con el usuario → `C borrar-variable <app> <CLAVE> --confirmado` |
 | `rollback <app>` | `C rollback <app> --confirmado` lista imágenes; **pregunta cuál** y confirma → `C rollback <app> --imagen <tag> --confirmado` |
 | `retirar <app>` | Explica qué se borra (app, y BD si la hay: **antes ofrece copia**). Tras un «sí» explícito: `C retirar <app> --confirmado [--con-bd] [--con-proyecto]` |
 
