@@ -424,6 +424,20 @@ def cmd_rollback(a):
     return {"ok": True, **api("POST", f"/applications/{app}/rollback", {"docker_tag": a.imagen})}
 
 
+def _esperar_borrado(ruta: str, timeout: int = 180) -> bool:
+    """Coolify borra en segundo plano: espera a que el recurso dé 404 (limpieza del servidor terminada)."""
+    limite = time.time() + timeout
+    while time.time() < limite:
+        try:
+            api("GET", ruta)
+        except Error as e:
+            if "HTTP 404" in str(e):
+                return True
+            raise
+        time.sleep(3)
+    return False
+
+
 def cmd_retirar(a):
     if not a.confirmado:
         raise Error("Retirar requiere --confirmado (el usuario debe aprobarlo antes).")
@@ -433,10 +447,18 @@ def cmd_retirar(a):
     api("DELETE", f"/applications/{app}", consulta={"delete_configurations": "true", "delete_volumes": "true",
                                                       "docker_cleanup": "true", "delete_connected_networks": "true"})
     borrado = {"app": app}
+    pendientes = [f"/applications/{app}"]
     if a.con_bd and reg.get(nombre, {}).get("db_uuid"):
         api("DELETE", f"/databases/{reg[nombre]['db_uuid']}", consulta={"delete_volumes": "true"})
         borrado["db"] = reg[nombre]["db_uuid"]
-    if a.con_proyecto and reg.get(nombre, {}).get("proyecto_uuid"):
+        pendientes.append(f"/databases/{reg[nombre]['db_uuid']}")
+    # Si se borra el proyecto antes de que Coolify termine, su limpieza falla y deja volúmenes,
+    # imágenes y carpetas huérfanos en el servidor. Por eso se espera a que cada recurso desaparezca.
+    sin_terminar = [r for r in pendientes if not _esperar_borrado(r)]
+    if sin_terminar:
+        borrado["aviso"] = "Coolify no terminó a tiempo de borrar: " + ", ".join(sin_terminar) + \
+                           " (el proyecto no se borra; repite más tarde)"
+    elif a.con_proyecto and reg.get(nombre, {}).get("proyecto_uuid"):
         try:
             api("DELETE", f"/projects/{reg[nombre]['proyecto_uuid']}")
             borrado["proyecto"] = reg[nombre]["proyecto_uuid"]

@@ -16,6 +16,7 @@ Aprendidos desplegando apps reales en Coolify v4.6 sobre una Raspberry Pi 5 (ARM
 | El aviso (webhook) de GitHub no llega | La Webhook URL de la GitHub App apunta a una IP privada | En GitHub → Developer settings → GitHub Apps → la app → Webhook URL pública (ruta `/webhooks/source/github/events`) |
 | La API devuelve 403 | La IP del Mac no está en «Allowed IPs» o el token no tiene permiso | Settings → Access and API; token con `read`, `write`, `deploy`, `delete` |
 | 403 «Missing required permissions: delete» al borrar | El permiso `delete` es aparte de `write` | Crear un token nuevo que lo incluya (los permisos no se editan) |
+| Tras retirar quedan volúmenes, imágenes o carpetas en el servidor | Se borró el proyecto antes de que Coolify terminara de borrar la app o la BD (lo hace en segundo plano) y su limpieza falló («Attempt to read property "project" on null» en el log) | `retirar` ya espera a que cada recurso dé 404 antes de borrar el proyecto. Restos antiguos: `docker volume rm`, `docker image rm` y `/data/coolify/{applications,databases}/<uuid>` |
 | La API no responde | No estás en la red de casa ni en la VPN, o la API está desactivada | Conectar la VPN o activar la API |
 | Un despliegue corta un proceso largo de la app | Cada despliegue reinicia el contenedor | Para apps con tareas largas, crear con `--sin-autodeploy` y desplegar a mano |
 | La Pi se calienta mucho al compilar | Builds pesadas de Node/Angular | Normal 1-2 min; si pasa de 80 °C a menudo, mejorar ventilación |

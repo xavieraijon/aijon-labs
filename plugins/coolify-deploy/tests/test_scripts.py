@@ -176,3 +176,25 @@ def test_todas_las_plantillas_se_rellenan_con_los_valores_por_defecto():
 def test_borrar_variable_exige_confirmacion(config):
     with pytest.raises(coolify.Error):
         coolify.cmd_borrar_variable(argparse.Namespace(app="x", clave="A", confirmado=False))
+
+
+def test_retirar_espera_antes_de_borrar_el_proyecto(config, monkeypatch):
+    """El proyecto solo se borra cuando la app y la BD ya han desaparecido (si no, quedan restos en el servidor)."""
+    coolify.guardar_en_registro("x", {"app_uuid": "a1", "db_uuid": "d1", "proyecto_uuid": "p1"})
+    llamadas, consultas = [], {"/applications/a1": 2, "/databases/d1": 1}
+
+    def api_falsa(metodo, ruta, cuerpo=None, consulta=None):
+        llamadas.append((metodo, ruta))
+        if metodo == "GET":
+            if consultas[ruta] == 0:
+                raise coolify.Error("HTTP 404 en GET")
+            consultas[ruta] -= 1
+        return {}
+
+    monkeypatch.setattr(coolify, "api", api_falsa)
+    monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
+    r = coolify.cmd_retirar(argparse.Namespace(app="x", confirmado=True, con_bd=True, con_proyecto=True))
+    assert r["borrado"]["proyecto"] == "p1"
+    borrar_proyecto = llamadas.index(("DELETE", "/projects/p1"))
+    assert all(m == "GET" for m, _ in llamadas[borrar_proyecto - 2:borrar_proyecto])
+    assert ("GET", "/applications/a1") in llamadas[:borrar_proyecto]
