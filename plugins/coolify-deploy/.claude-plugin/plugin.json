@@ -1,0 +1,18 @@
+{
+  "name": "coolify-deploy",
+  "version": "0.1.0",
+  "description": "Prepara y despliega proyectos propios en Coolify por su API: Dockerfile, prueba local, dominio HTTPS, PostgreSQL y despliegue en cada push.",
+  "author": {
+    "name": "Xavi Aijon",
+    "url": "https://github.com/xavieraijon"
+  },
+  "homepage": "https://github.com/xavieraijon/claude-toolkit/tree/main/plugins/coolify-deploy",
+  "repository": "https://github.com/xavieraijon/claude-toolkit",
+  "license": "MIT",
+  "keywords": [
+    "coolify",
+    "deploy",
+    "docker",
+    "self-hosting"
+  ]
+}
