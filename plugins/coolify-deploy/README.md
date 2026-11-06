@@ -6,7 +6,7 @@ tu Coolify con dominio HTTPS, base de datos si hace falta y despliegue automáti
 Coolify: sin navegador.
 
 ```
-> despliega ~/proyectos/mi-tienda
+> despliega ~/Projects/mi-tienda
 > /desplegar-coolify estado
 > /desplegar-coolify logs mi-tienda
 > /desplegar-coolify retirar app-de-prueba
@@ -48,7 +48,7 @@ Django, Laravel/Symfony ni SSR de Nuxt/Astro/SvelteKit.
    ```
 4. Pide a Claude «configura coolify-deploy». Ejecutará:
    ```bash
-   coolify.py config-init --url http://<ip-coolify>:<puerto> --dominio midominio.org --ssh usuario@servidor --reservado hooks
+   coolify.py config-init --url http://<ip-coolify>:<puerto> --dominio midominio.org --ssh usuario@servidor --reservado hooks --proyectos ~/Projects
    ```
    que descubre el servidor y la GitHub App y lo guarda en `~/.config/coolify-deploy/config.json`.
 
@@ -68,7 +68,7 @@ te da el comando para que lo ejecutes tú (`! git push`).
 
 | Ruta | Contenido |
 |---|---|
-| `~/.config/coolify-deploy/config.json` | URL de Coolify, dominio base, uuids del servidor y la GitHub App, ssh, límites por defecto |
+| `~/.config/coolify-deploy/config.json` | URL de Coolify, dominio base, uuids del servidor y la GitHub App, ssh, carpeta de proyectos, límites por defecto |
 | `~/.config/coolify-deploy/apps.json` | Registro de las apps desplegadas (nombre → uuids, dominio) |
 | `~/.config/coolify-deploy/secretos/<app>.env` | Valores de las variables de cada app (`chmod 600`) |
 

@@ -18,4 +18,4 @@
    no se saltan nunca.
 4. Material de consulta largo en `referencia/` (Claude lo lee solo cuando lo necesita).
 5. Tests en `plugins/<plugin>/tests/`, README del plugin y entrada en `CHANGELOG.md`.
-6. Prueba en local: `/plugin marketplace add ~/claude-toolkit` y `/plugin install <plugin>@xavi-toolkit`.
+6. Prueba en local: `/plugin marketplace add ~/xavi-ai-toolkit` y `/plugin install <plugin>@xavi-ai-toolkit`.

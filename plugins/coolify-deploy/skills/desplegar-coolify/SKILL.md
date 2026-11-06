@@ -22,7 +22,7 @@ Abreviaturas en este documento: `C=python3 -I ${CLAUDE_SKILL_DIR}/scripts/coolif
 `P` (preparar), `L` (probar_local) y `V` (verificar). **Escribe siempre la orden completa**, no las abreviaturas.
 
 Configuración del usuario (fuera del repo): `~/.config/coolify-deploy/config.json` (url, dominio base, uuids, ssh,
-subdominios reservados), `apps.json` (registro de apps desplegadas), `secretos/<app>.env` (valores de variables).
+subdominios reservados, carpeta de proyectos), `apps.json` (registro de apps desplegadas), `secretos/<app>.env` (valores de variables).
 El token de la API está en el Llavero de macOS (servicio `coolify-api-token`). **Nunca muestres tokens ni contraseñas.**
 
 ---
@@ -53,13 +53,13 @@ El token de la API está en el Llavero de macOS (servicio `coolify-api-token`). 
 
 ### A · Comprobaciones previas
 1. `C comprobar` → si falla, guía al usuario según el error (API desactivada, IP no permitida, token, no está en casa/VPN).
-   Si no hay configuración: `C config-init --url <URL> --dominio <dominio> --ssh <usuario@host> --reservado hooks`
+   Si no hay configuración: `C config-init --url <URL> --dominio <dominio> --ssh <usuario@host> --reservado hooks --proyectos <carpeta>`
    (pide los datos al usuario la primera vez).
 2. `V --servidor` → temperatura, disco y Coolify sanos (regla 7).
 
 ### B · Análisis
-- Si te dan `owner/repo` y no está en local: `gh repo clone owner/repo ~/proyectos/<repo>` (pregunta la carpeta si
-  no hay convención).
+- Si te dan `owner/repo` y no está en local: `gh repo clone owner/repo <carpeta_proyectos>/<repo>` (la carpeta está
+  en `config.json`; los proyectos nuevos también se crean ahí).
 - `A <ruta>` y lee: `desplegable`, `bloqueos`, `avisos`, `stack`, `variables`, `bases_de_datos`, `secretos`,
   `tiene_login_estimado`, `servicios_de_pago_estimados`, `git`.
 - Si hay **bloqueos**, para aquí y explícalos con lo que haría falta para resolverlos.

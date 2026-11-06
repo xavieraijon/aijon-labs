@@ -184,11 +184,13 @@ def cmd_config_init(a):
         "github_app_uuid": gh_app["uuid"], "github_app_id": gh_app.get("id"), "github_app_name": gh_app.get("name"),
         "subdominios_reservados": sorted(set(previa.get("subdominios_reservados", []) + (a.reservado or []))),
         "ssh": a.ssh or previa.get("ssh"),
+        "carpeta_proyectos": a.proyectos or previa.get("carpeta_proyectos") or "~/Projects",
         "limites_defecto": previa.get("limites_defecto", {"cpus": "1", "memoria": "512m"}),
     })
     escribir_json(CONFIG, cfg)
     return {"ok": True, "config": str(CONFIG), "servidor": cfg["server_name"], "github_app": cfg["github_app_name"],
-            "dominio_base": cfg["dominio_base"], "reservados": cfg["subdominios_reservados"]}
+            "dominio_base": cfg["dominio_base"], "reservados": cfg["subdominios_reservados"],
+            "carpeta_proyectos": cfg["carpeta_proyectos"]}
 
 
 def _apps() -> list[dict]:
@@ -439,6 +441,7 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--url"); c.add_argument("--dominio"); c.add_argument("--ssh")
     c.add_argument("--servidor"); c.add_argument("--github-app", dest="github_app")
     c.add_argument("--reservado", action="append", help="subdominio que no se puede usar (repetible)")
+    c.add_argument("--proyectos", help="carpeta donde se clonan los proyectos (por defecto ~/Projects)")
     c.set_defaults(f=cmd_config_init)
 
     s.add_parser("estado", help="apps y bases de datos").set_defaults(f=cmd_estado)

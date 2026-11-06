@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
-  "name": "xavi-toolkit",
+  "name": "xavi-ai-toolkit",
   "description": "Skills, hooks y mods para Claude Code creados por Xavi Aijon: despliegues, automatizaciones y ajustes de la interfaz.",
   "owner": { "name": "Xavi Aijon", "url": "https://github.com/xavieraijon" },
   "plugins": [
