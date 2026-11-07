@@ -1,4 +1,11 @@
-# aijon-labs
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/aijonlabs-logo-dark.svg">
+    <img alt="aijon-labs" src="assets/brand/aijonlabs-logo-light.svg" width="420">
+  </picture>
+</p>
+
+<p align="center"><em>Claude Code plugins, built and maintained by Xavi Aijon.</em></p>
 
 *[Leer en castellano](README.es.md)*
 

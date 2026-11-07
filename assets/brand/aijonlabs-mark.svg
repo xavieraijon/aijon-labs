@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><defs>
+<linearGradient id="gc" x1="40" y1="30" x2="216" y2="226" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2DD4BF"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient>
+<clipPath id="cc"><path d="M110 44 V100 L58 196 Q50 216 72 216 H184 Q206 216 198 196 L146 100 V44 Z"/></clipPath></defs><g>
+<g clip-path="url(#cc)"><path d="M0 150 Q32 136 64 150 T128 150 T192 150 T256 150 V256 H0 Z" fill="url(#gc)"/></g>
+<path d="M110 44 V100 L58 196 Q50 216 72 216 H184 Q206 216 198 196 L146 100 V44" fill="none" stroke="url(#gc)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M94 40 H162" stroke="url(#gc)" stroke-width="14" stroke-linecap="round"/>
+<circle cx="124" cy="124" r="7" fill="#2DD4BF"/><circle cx="130" cy="98" r="4.5" fill="#8B5CF6"/><circle cx="122" cy="76" r="3" fill="#2DD4BF"/>
+</g></svg>
