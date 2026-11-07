@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from coolify import config  # noqa: E402
 
-USER_AGENT = "coolify-ops-verify/1.0 (+https://github.com/xavieraijon/xavi-ai-toolkit)"
+USER_AGENT = "coolify-ops-verify/1.0 (+https://github.com/xavieraijon/aijon-labs)"
 HEADERS = {"Accept": "application/json", "User-Agent": USER_AGENT}
 
 

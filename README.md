@@ -1,4 +1,4 @@
-# xavi-ai-toolkit
+# aijon-labs
 
 Colección personal de **skills, hooks y mods para [Claude Code](https://code.claude.com)**, empaquetados como
 plugins de un marketplace. Todo está en castellano.
@@ -12,14 +12,14 @@ plugins de un marketplace. Todo está en castellano.
 Desde Claude Code:
 
 ```
-/plugin marketplace add xavieraijon/xavi-ai-toolkit
-/plugin install coolify-ops@xavi-ai-toolkit
+/plugin marketplace add xavieraijon/aijon-labs
+/plugin install coolify-ops@aijon-labs
 ```
 
 Para probar cambios sin publicarlos, añade el marketplace desde la carpeta local:
 
 ```
-/plugin marketplace add ~/xavi-ai-toolkit
+/plugin marketplace add ~/aijon-labs
 ```
 
 Cada plugin tiene su propio README con los requisitos y la configuración.
