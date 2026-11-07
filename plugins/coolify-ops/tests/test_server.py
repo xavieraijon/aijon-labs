@@ -179,5 +179,19 @@ def test_ports_are_requested_together_and_polled(monkeypatch):
 
 def test_rate_limit_is_explained(monkeypatch):
     monkeypatch.setattr(server, "_check_host", lambda path: {"error": "limit_exceeded"})
+    monkeypatch.setattr(server.time, "sleep", lambda s: None)
     with pytest.raises(server.Error, match="rate limit"):
         server.tcp_from_internet("example.org", [80])
+
+
+def test_rate_limit_backs_off_and_retries(monkeypatch):
+    answers = [{"error": "limit_exceeded"}, {"error": "limit_exceeded"}, {"request_id": "r1"}]
+    def fake(path):
+        if path.startswith("check-tcp"):
+            return answers.pop(0)
+        return {"n": [{"address": "x", "time": 0.1}]}
+    sleeps = []
+    monkeypatch.setattr(server, "_check_host", fake)
+    monkeypatch.setattr(server.time, "sleep", sleeps.append)
+    assert server.tcp_from_internet("example.org", [443])[443]["state"] == "open"
+    assert sleeps.count(server.RATE_LIMIT_WAIT) == 2

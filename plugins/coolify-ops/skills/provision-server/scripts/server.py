@@ -34,6 +34,7 @@ COOLIFY_CONTAINERS = ["coolify", "coolify-db", "coolify-redis", "coolify-proxy"]
 OPTIONAL_CONTAINERS = ["coolify-realtime", "coolify-sentinel"]  # depend on the Coolify version
 MIN_RAM_MB, RECOMMENDED_RAM_MB = 1800, 3800  # «2 GB» / «4 GB» machines report a bit less
 MIN_DISK_GB = 20
+RATE_LIMIT_RETRIES, RATE_LIMIT_WAIT = 6, 20  # check-host: up to ~2 minutes of back-off per port
 # Addresses that only exist inside a network: a public DNS record pointing at one cannot work
 LOCAL_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
                                                  "127.0.0.0/8", "169.254.0.0/16")]
@@ -280,9 +281,14 @@ def tcp_from_internet(host: str, ports: list[int], timeout: int = 60) -> dict[in
     rids = {}
     for i, port in enumerate(ports):
         if i:
-            time.sleep(1.5)  # check-host rate-limits bursts of requests
+            time.sleep(3)  # check-host rate-limits bursts of requests
         q = urllib.parse.urlencode({"host": f"{host}:{port}", "max_nodes": 3})
-        answer = _check_host(f"check-tcp?{q}")
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            answer = _check_host(f"check-tcp?{q}")
+            if "request_id" in answer or answer.get("error") != "limit_exceeded":
+                break
+            if attempt < RATE_LIMIT_RETRIES:
+                time.sleep(RATE_LIMIT_WAIT)  # back off and retry instead of giving up
         if "request_id" not in answer:
             if answer.get("error") == "limit_exceeded":
                 raise Error("check-host.net rate limit reached (too many checks in a short time): "
