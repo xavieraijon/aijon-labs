@@ -33,6 +33,9 @@ push. Everything goes through the Coolify API: no browser automation.
 Optionally with a private PostgreSQL. **Not** covered yet (the skill stops and explains): monorepos, multi-service
 apps, Django, Laravel/Symfony, Nuxt/Astro/SvelteKit SSR.
 
+New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scratch.md)
+([en castellano](../../docs/es/coolify-desde-cero.md)) before step 1 below.
+
 ## Requirements
 
 - Python 3.10+, `git`, [`gh`](https://cli.github.com) signed in, and Docker (for the local build check).

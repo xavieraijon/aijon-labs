@@ -24,6 +24,11 @@ Para probar cambios sin publicarlos, añade el marketplace desde la carpeta loca
 
 Cada plugin tiene su propio README con los requisitos y la configuración.
 
+## Tutoriales
+
+- [Coolify desde cero](docs/es/coolify-desde-cero.md) · [Coolify from scratch](docs/en/coolify-from-scratch.md) —
+  cómo montar tu propio servidor Coolify (VPS o en casa) antes de usar `coolify-ops`.
+
 ## Estructura
 
 ```

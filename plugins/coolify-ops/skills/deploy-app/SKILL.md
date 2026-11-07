@@ -30,7 +30,9 @@ API token: `COOLIFY_TOKEN`, or `~/.config/coolify-ops/token`, or the macOS Keych
 **Never print tokens or passwords.**
 
 If there is no configuration or no token, Coolify itself is probably not set up yet: point the user to the
-`provision-server` skill of this plugin, which installs and connects Coolify step by step.
+`provision-server` skill of this plugin (installs and connects Coolify step by step; checks progress, never
+handles `sudo` or passwords) or, meanwhile, to the written tutorial at `docs/en/coolify-from-scratch.md` in the
+repo root (`docs/es/coolify-desde-cero.md` in Spanish).
 
 ---
 
