@@ -7,3 +7,10 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# AI agent workspace (the «factory»): instructions and notes stay local, only the plugins are published
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+AGENTS.local.md
+.claude/
