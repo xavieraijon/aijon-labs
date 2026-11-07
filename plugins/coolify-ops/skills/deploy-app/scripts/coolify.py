@@ -498,6 +498,21 @@ def _remote_leftovers(target: str, uuids: list[str]) -> list[str] | None:
     return [line for line in r.stdout.splitlines() if re.search(pattern, line)]
 
 
+def _remove_app_images(target: str, app_uuid: str) -> int | None:
+    """Coolify keeps the images of a deleted app (named exactly after its uuid). Remove only those."""
+    if not re.fullmatch(r"[a-z0-9]{10,40}", app_uuid):
+        return None
+    script = (f"imgs=$(docker images --format '{{{{.Repository}}}}:{{{{.Tag}}}}' | grep '^{app_uuid}:'); "
+              "[ -n \"$imgs\" ] && docker image rm $imgs >/dev/null; echo \"$imgs\" | grep -c . || true")
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "sh -s"],
+                           input=script, capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    out = r.stdout.strip().splitlines()
+    return int(out[-1]) if r.returncode == 0 and out and out[-1].isdigit() else None
+
+
 def _wait_for_cleanup(uuids: list[str], timeout: int = 180) -> tuple[bool, str]:
     """Wait for Coolify's background cleanup of these resources. Returns (finished, how it was checked)."""
     target = (read_json(CONFIG, {}) or {}).get("ssh")
@@ -541,7 +556,11 @@ def cmd_decommission(a):
     if unfinished or not finished:
         deleted["warning"] = ("Coolify did not finish deleting in time: " + (", ".join(unfinished) or how)
                               + " (project kept; run decommission again later or delete it in Coolify)")
-    elif a.with_project and reg.get(name, {}).get("project_uuid"):
+    else:
+        target = (read_json(CONFIG, {}) or {}).get("ssh")
+        removed = _remove_app_images(target, app) if target else None
+        deleted["images"] = removed if removed is not None else "left to Coolify's scheduled Docker cleanup"
+    if not deleted.get("warning") and a.with_project and reg.get(name, {}).get("project_uuid"):
         try:
             api("DELETE", f"/projects/{reg[name]['project_uuid']}")
             deleted["project"] = reg[name]["project_uuid"]

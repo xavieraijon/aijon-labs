@@ -259,12 +259,14 @@ def test_decommission_waits_for_server_cleanup_not_for_404(config, monkeypatch):
     events = []
     monkeypatch.setattr(coolify, "api", _fake_delete_api(calls))
     monkeypatch.setattr(coolify, "_remote_leftovers", lambda target, uuids: events.append("check") or next(checks))
+    monkeypatch.setattr(coolify, "_remove_app_images", lambda target, uuid: events.append(("images", uuid)) or 1)
     monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
     real_api = coolify.api
     monkeypatch.setattr(coolify, "api", lambda *a, **k: (events.append(a[:2]), real_api(*a, **k))[1])
     r = coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=True, with_db=True, with_project=True))
     assert r["deleted"]["project"] == "p1" and "observed over ssh" in r["deleted"]["cleanup"]
     assert events.index(("DELETE", "/projects/p1")) > max(i for i, e in enumerate(events) if e == "check")
+    assert ("images", "a1") in events and r["deleted"]["images"] == 1
 
 
 def test_decommission_keeps_project_if_cleanup_never_finishes(config, monkeypatch):
@@ -273,9 +275,16 @@ def test_decommission_keeps_project_if_cleanup_never_finishes(config, monkeypatc
     calls = []
     monkeypatch.setattr(coolify, "api", _fake_delete_api(calls))
     monkeypatch.setattr(coolify, "_remote_leftovers", lambda target, uuids: ["volume a1-data"])
+    monkeypatch.setattr(coolify, "_remove_app_images", lambda *a: pytest.fail("images removed before cleanup"))
     clock = iter(range(0, 10_000, 60))
     monkeypatch.setattr(coolify.time, "time", lambda: next(clock))
     monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
     r = coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=True, with_db=False, with_project=True))
     assert "project" not in r["deleted"] and "warning" in r["deleted"]
     assert ("DELETE", "/projects/p1") not in calls
+
+
+def test_remove_app_images_rejects_unsafe_uuids(monkeypatch):
+    monkeypatch.setattr(coolify.subprocess, "run", lambda *a, **k: pytest.fail("ssh must not run"))
+    for bad in ("x; rm -rf /", "UPPER", "a1", "$(id)", "abc def ghi jkl mno"):
+        assert coolify._remove_app_images("user@server", bad) is None
