@@ -2,7 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Cada plugin tiene su propia versión.
 
-## coolify-deploy
+## coolify-ops
+
+### 0.2.0 — 2026-11-07
+- Renamed: plugin `coolify-deploy` → `coolify-ops`, skill `desplegar-coolify` → `deploy-app`.
+- Code, commands, JSON keys and messages in English (Claude still answers in the user's language).
+  New command names: `check`, `init`, `status`, `domain-check`, `create-project`, `create-app`, `create-postgres`,
+  `env-set`, `env-push`, `env-list`, `env-delete`, `deploy`, `wait`, `last-deployment`, `logs`, `rollback`,
+  `decommission`.
+- Token can also come from `~/.config/coolify-ops/token` (Linux and other systems without a Keychain).
+- The v0.1 configuration (`~/.config/coolify-deploy`, Spanish keys) is migrated automatically.
+- `decommission` waits for Coolify to finish deleting the app and database before deleting the project
+  (it used to leave volumes, images and folders behind).
+- `status` reads auto-deploy from the app settings; `env-list` hides preview copies; new `env-delete`.
+- The token needs the `delete` permission as well.
+
+## coolify-deploy (old name)
 
 ### 0.1.0 — 2026-11-06
 - Primera versión de la skill `desplegar-coolify`: análisis del proyecto, Dockerfile desde plantillas

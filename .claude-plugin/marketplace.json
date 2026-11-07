@@ -1,15 +1,15 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "xavi-ai-toolkit",
-  "description": "Skills, hooks y mods para Claude Code creados por Xavi Aijon: despliegues, automatizaciones y ajustes de la interfaz.",
+  "description": "Skills, hooks and mods for Claude Code by Xavi Aijon: self-hosted deployments, automation and interface tweaks.",
   "owner": { "name": "Xavi Aijon", "url": "https://github.com/xavieraijon" },
   "plugins": [
     {
-      "name": "coolify-deploy",
-      "source": "./plugins/coolify-deploy",
-      "description": "Prepara y despliega proyectos propios en Coolify por su API: Dockerfile, prueba local, dominio HTTPS, PostgreSQL y despliegue en cada push.",
+      "name": "coolify-ops",
+      "source": "./plugins/coolify-ops",
+      "description": "Provision a self-hosted Coolify server and deploy your projects to it through its API: Dockerfile, local build check, HTTPS domain, PostgreSQL and auto-deploy on every push.",
       "category": "deployment",
-      "tags": ["coolify", "deploy", "docker", "self-hosting"]
+      "tags": ["coolify", "deploy", "docker", "self-hosting", "paas"]
     }
   ]
 }

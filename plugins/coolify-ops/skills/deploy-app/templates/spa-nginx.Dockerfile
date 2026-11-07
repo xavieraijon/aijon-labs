@@ -1,4 +1,4 @@
-# Plantilla: SPA (Angular, Vite/React/Vue, CRA) compilada y servida con nginx.
+# Template: SPA (Angular, Vite/React/Vue, CRA) built and served by nginx.
 # Variables: {{NODE_VERSION}} {{BUILD_CMD}} {{BUILD_DIR}}
 FROM node:{{NODE_VERSION}}-alpine AS build
 WORKDIR /app

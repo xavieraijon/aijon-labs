@@ -5,7 +5,7 @@ plugins de un marketplace. Todo está en castellano.
 
 | Plugin | Tipo | Qué hace |
 |---|---|---|
-| [`coolify-deploy`](plugins/coolify-deploy/) | skill | Prepara y despliega tus proyectos en un servidor [Coolify](https://coolify.io) por su API: Dockerfile, prueba local, dominio HTTPS, PostgreSQL y despliegue en cada push |
+| [`coolify-ops`](plugins/coolify-ops/) | skills | Instala Coolify y despliega tus proyectos en tu servidor [Coolify](https://coolify.io) por su API: Dockerfile, prueba local, dominio HTTPS, PostgreSQL y despliegue en cada push |
 
 ## Instalación
 
@@ -13,7 +13,7 @@ Desde Claude Code:
 
 ```
 /plugin marketplace add xavieraijon/xavi-ai-toolkit
-/plugin install coolify-deploy@xavi-ai-toolkit
+/plugin install coolify-ops@xavi-ai-toolkit
 ```
 
 Para probar cambios sin publicarlos, añade el marketplace desde la carpeta local:
@@ -30,7 +30,7 @@ Cada plugin tiene su propio README con los requisitos y la configuración.
 .claude-plugin/marketplace.json   catálogo de plugins del repo
 plugins/<plugin>/
   .claude-plugin/plugin.json      manifiesto del plugin (nombre, versión, autor)
-  skills/<skill>/SKILL.md         instrucciones de la skill (+ scripts/, plantillas/, referencia/)
+  skills/<skill>/SKILL.md         instrucciones de la skill (+ scripts/, templates/, reference/)
   hooks/hooks.json                hooks (si los tiene)
   tests/                          tests de pytest
   README.md
