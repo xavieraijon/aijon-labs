@@ -35,6 +35,6 @@ Lee antes las [convenciones](convenciones.md). En resumen:
 - Código y mensajes en inglés; documentación para usuarios en inglés y castellano (si solo escribes uno, dilo en
   el PR y se traducirá).
 - [Commits convencionales](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:`…) y entrada en
-  `CHANGELOG.md` para los cambios visibles.
+  `CHANGELOG.md` (en inglés) para los cambios visibles.
 
 Guías: [crear una skill](crear-skill.md) · [un hook](crear-hook.md) · [un mod](crear-mod.md).

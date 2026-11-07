@@ -34,7 +34,7 @@ Read the [conventions](docs/en/conventions.md) first. In short:
 - Keep the safety rules in [SECURITY.md](SECURITY.md) intact; changes that relax them need a strong reason.
 - Code and messages in English; user docs in English and Spanish (if you only write one, say so in the PR and it
   will be translated).
-- [Conventional commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:`…) and a `CHANGELOG.md`
+- [Conventional commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:`…) and a `CHANGELOG.md` (in English)
   entry for user-visible changes.
 
 Guides: [creating a skill](docs/en/creating-a-skill.md) · [a hook](docs/en/creating-a-hook.md) ·

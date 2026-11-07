@@ -1,6 +1,6 @@
 # Convenciones
 
-- **Idioma:** código, órdenes, claves JSON y mensajes de los scripts en inglés. La documentación para usuarios, en
+- **Idioma:** código, órdenes, claves JSON, mensajes de los scripts, commits y `CHANGELOG.md` en inglés. La documentación para usuarios, en
   inglés y castellano (`docs/en/` y `docs/es/`, `README.md` y `README.es.md`). Las skills responden en el idioma
   del usuario.
 - **Un plugin por tema** (`plugins/<nombre>/`). Un plugin puede tener varias skills y hooks relacionados.

@@ -1,6 +1,6 @@
 # Conventions
 
-- **Language:** code, commands, JSON keys and script messages in English. User documentation in English and
+- **Language:** code, commands, JSON keys, script messages, commits and `CHANGELOG.md` in English. User documentation in English and
   Spanish (`docs/en/` and `docs/es/`, `README.md` and `README.es.md`). Skills answer in the user's language.
 - **One plugin per topic** (`plugins/<name>/`). A plugin may hold several related skills and hooks.
 - **Names** in `kebab-case`. The reserved prefixes `claude-`, `anthropic-` and `cc-plugin-` are not allowed for
