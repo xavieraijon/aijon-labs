@@ -20,7 +20,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
 - New skill `provision-server`: guides the setup of a Coolify server (diagnosis over ssh, wildcard DNS, ports from
   the Internet, hardening, install, API, GitHub App), checking every step; never runs `sudo` or handles passwords.
   New script `server.py` (`diagnose`, `dns`, `ports`, `health`).
-- Tutorial «Coolify from scratch» in English and Spanish (`docs/en`, `docs/es`).
+- Tutorial «Coolify from scratch» in English and Spanish (`docs/en`, `docs/es`), reviewed end to end: Docker
+  bypasses ufw (use the VPS provider's firewall), publishing only the GitHub webhook path through a Traefik dynamic
+  configuration, reaching the API on a VPS through a VPN, sshd drop-in file, token storage without shell history,
+  and the exact Coolify menu names.
+- `server.py ports` checks the realtime ports 6001/6002 as well, submits all ports at once, waits longer for slow
+  check-host nodes and explains its rate limit.
 - Example app `examples/hello-fastapi` to try the whole flow.
 - Bilingual repository: `README.md`/`README.es.md`, contributor guides in `docs/en` and `docs/es`, `SECURITY.md`,
   `CONTRIBUTING.md`, issue and pull request templates.

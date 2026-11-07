@@ -3,7 +3,7 @@
 
 Usage:  server.py diagnose <user@host>          system, CPU, RAM, disk, Docker, Coolify, ports in use, hardening
         server.py dns <domain> [--expect-ip IP]  does the wildcard *.<domain> resolve (public resolver), to which IP
-        server.py ports <host> [--ports 80 443] [--private 8000]
+        server.py ports <host> [--ports 80 443] [--private 8000 6001 6002]
                                                  reachability from the Internet (check-host.net)
         server.py health [--url URL] [--ssh user@host]
                                                  Coolify answering and its containers healthy
@@ -163,7 +163,8 @@ def evaluate(facts: dict) -> dict:
     ufw = facts.get("UFW") == "active"
     check("firewall", ufw, "ufw active" if ufw else "ufw not active")
     if not ufw:
-        warnings.append("no active ufw firewall (step 4 of the guide; a VPS provider firewall also counts)")
+        warnings.append("no active ufw firewall: optional extra layer. On a VPS the provider's firewall is what "
+                        "protects Docker ports (ufw does not); at home the router does. Check with «ports».")
     unattended = facts.get("UNATTENDED") == "yes"
     check("automatic_updates", unattended, "unattended-upgrades installed" if unattended else "not installed")
     if not unattended:
@@ -274,42 +275,59 @@ def classify_tcp(results: dict) -> dict:
     return {"state": "unknown", "nodes": states}
 
 
-def tcp_from_internet(host: str, port: int) -> dict:
-    q = urllib.parse.urlencode({"host": f"{host}:{port}", "max_nodes": 3})
-    rid = _check_host(f"check-tcp?{q}")["request_id"]
-    data: dict = {}
-    for _ in range(15):
-        time.sleep(2)
-        data = _check_host(f"check-result/{rid}")
-        if data and all(v is not None for v in data.values()):
-            break
-    return classify_tcp(data)
+def tcp_from_internet(host: str, ports: list[int], timeout: int = 60) -> dict[int, dict]:
+    """Ask check-host for every port at once, then poll until all nodes answered or the timeout expires."""
+    rids = {}
+    for i, port in enumerate(ports):
+        if i:
+            time.sleep(1.5)  # check-host rate-limits bursts of requests
+        q = urllib.parse.urlencode({"host": f"{host}:{port}", "max_nodes": 3})
+        answer = _check_host(f"check-tcp?{q}")
+        if "request_id" not in answer:
+            if answer.get("error") == "limit_exceeded":
+                raise Error("check-host.net rate limit reached (too many checks in a short time): "
+                            "wait a few minutes and try again")
+            raise Error(f"check-host.net refused the check: {answer.get('error') or answer}")
+        rids[port] = answer["request_id"]
+    results: dict[int, dict] = {port: {} for port in ports}
+    deadline = time.time() + timeout
+    pending = set(ports)
+    while pending and time.time() < deadline:
+        time.sleep(3)
+        for port in list(pending):
+            data = _check_host(f"check-result/{rids[port]}")
+            results[port] = data or {}
+            if data and all(v is not None for v in data.values()):
+                pending.discard(port)
+    return {port: classify_tcp(results[port]) for port in ports}
 
 
 def cmd_ports(a) -> dict:
     result, ok, hints = {}, True, []
     try:
-        for p in a.ports:
-            r = tcp_from_internet(a.host, p)
-            result[str(p)] = r
-            if r["state"] == "filtered":
-                ok = False
-                hints.append(f"port {p} does not reach the server from the Internet: forward it on the router "
-                             "(home) or open it in the provider/ufw firewall (VPS); behind CGNAT it cannot work")
-            elif r["state"] == "closed":
-                hints.append(f"port {p} reaches the server but nothing listens yet (normal before installing Coolify)")
-            elif r["state"] == "unknown":
-                ok = False
-                hints.append(f"port {p}: check-host gave no clear answer, try again in a minute")
-        for p in a.private:
-            r = tcp_from_internet(a.host, p)
-            result[str(p)] = {**r, "should_be_private": True}
-            if r["state"] == "open":
-                ok = False
-                hints.append(f"port {p} (Coolify panel) is open to the whole Internet: close it in the firewall "
-                             "and reach the panel over the LAN, a VPN or an ssh tunnel")
+        states = tcp_from_internet(a.host, list(a.ports) + list(a.private))
     except (urllib.error.URLError, OSError, KeyError, json.JSONDecodeError) as e:
         raise Error(f"check-host.net unavailable: {e}") from None
+    for p in a.ports:
+        r = states[p]
+        result[str(p)] = r
+        if r["state"] == "filtered":
+            ok = False
+            hints.append(f"port {p} does not reach the server from the Internet: forward it on the router "
+                         "(home) or open it in the provider's firewall (VPS); behind CGNAT it cannot work")
+        elif r["state"] == "closed":
+            hints.append(f"port {p} reaches the server but nothing listens yet (normal before installing Coolify)")
+        elif r["state"] == "unknown":
+            ok = False
+            hints.append(f"port {p}: check-host gave no clear answer (it may be busy), try again in a minute")
+    for p in a.private:
+        r = states[p]
+        result[str(p)] = {**r, "should_be_private": True}
+        if r["state"] == "open":
+            ok = False
+            hints.append(f"port {p} (Coolify panel/realtime) is open to the whole Internet: close it in the "
+                         "VPS provider's firewall (ufw does not help: Docker bypasses it) or stop forwarding it "
+                         "on the router, and reach the panel over the LAN, a VPN or an ssh tunnel")
     return {"ok": ok, "host": a.host, "ports": result, "hints": hints}
 
 
@@ -386,7 +404,7 @@ def main() -> None:
     s = sub.add_parser("ports")
     s.add_argument("host")
     s.add_argument("--ports", nargs="*", type=int, default=[80, 443])
-    s.add_argument("--private", nargs="*", type=int, default=[8000])
+    s.add_argument("--private", nargs="*", type=int, default=[8000, 6001, 6002])  # panel and realtime
     s = sub.add_parser("health")
     s.add_argument("--url")
     s.add_argument("--ssh")

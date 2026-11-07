@@ -125,13 +125,15 @@ def test_classify_tcp_states():
 
 def test_public_panel_is_flagged(monkeypatch):
     states = {80: "open", 443: "open", 8000: "open"}
-    monkeypatch.setattr(server, "tcp_from_internet", lambda host, p: {"state": states[p], "nodes": [states[p]]})
+    monkeypatch.setattr(server, "tcp_from_internet",
+                        lambda host, ports: {p: {"state": states[p], "nodes": [states[p]]} for p in ports})
     r = server.cmd_ports(argparse.Namespace(host="example.org", ports=[80, 443], private=[8000]))
     assert not r["ok"] and any("8000" in h for h in r["hints"])
 
 
 def test_closed_before_install_is_fine(monkeypatch):
-    monkeypatch.setattr(server, "tcp_from_internet", lambda host, p: {"state": "filtered" if p == 8000 else "closed"})
+    monkeypatch.setattr(server, "tcp_from_internet",
+                        lambda host, ports: {p: {"state": "filtered" if p == 8000 else "closed"} for p in ports})
     r = server.cmd_ports(argparse.Namespace(host="example.org", ports=[80, 443], private=[8000]))
     assert r["ok"]
 
@@ -159,3 +161,23 @@ def test_ssh_explains_unknown_host_key(monkeypatch):
     monkeypatch.setattr(server.subprocess, "run", lambda *a, **k: R())
     with pytest.raises(server.Error, match="accept it"):
         server.ssh("user@host", "true")
+
+
+def test_ports_are_requested_together_and_polled(monkeypatch):
+    """All ports are submitted first; a slow node (None) is polled again instead of being given up."""
+    answers = {"r80": [{"n": None}, {"n": [{"address": "x", "time": 0.1}]}], "r6001": [{"n": [{"error": "timed out"}]}]}
+    def fake(path):
+        if path.startswith("check-tcp"):
+            return {"request_id": "r80" if "%3A80&" in path else "r6001"}
+        rid = path.rsplit("/", 1)[1]
+        return answers[rid].pop(0) if len(answers[rid]) > 1 else answers[rid][0]
+    monkeypatch.setattr(server, "_check_host", fake)
+    monkeypatch.setattr(server.time, "sleep", lambda s: None)
+    states = server.tcp_from_internet("example.org", [80, 6001])
+    assert states[80]["state"] == "open" and states[6001]["state"] == "filtered"
+
+
+def test_rate_limit_is_explained(monkeypatch):
+    monkeypatch.setattr(server, "_check_host", lambda path: {"error": "limit_exceeded"})
+    with pytest.raises(server.Error, match="rate limit"):
+        server.tcp_from_internet("example.org", [80])

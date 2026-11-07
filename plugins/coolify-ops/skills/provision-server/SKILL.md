@@ -17,7 +17,7 @@ Scripts (all print JSON, all read-only):
 |---|---|
 | `S diagnose <user@host>` | OS, architecture, RAM, disk, Docker, Coolify state, ports in use, ssh password login, firewall, automatic updates, public/LAN IP |
 | `S dns <domain> [--expect-ip IP]` | Does a random `*.domain` name resolve on a public resolver, and to which IP |
-| `S ports <host> [--ports 80 443] [--private <panel port>]` | TCP reachability from 3 countries (check-host.net): `open`, `closed` (reaches the server, nothing listens), `filtered` (blocked) |
+| `S ports <host> [--ports 80 443] [--private 8000 6001 6002]` | TCP reachability from 3 countries (check-host.net): `open`, `closed` (reaches the server, nothing listens), `filtered` (blocked) |
 | `S health [--url URL] [--ssh user@host]` | `/api/health` answers and Coolify's containers are healthy |
 | `C check`, `C init …` | Coolify API (from `deploy-app`): token valid, server and GitHub App discovered |
 
@@ -62,19 +62,23 @@ If ssh does not work yet: for a key error give `ssh-copy-id user@host`; for an u
 Give the user the block from step 4 of the guide, only the lines they still need, to run in their own ssh
 session. Warn before the ssh line: they must have key login working first or they will lock themselves out
 (keeping the current session open while testing a new one is the safe way).
-On a **home server**, the router already blocks everything but the forwarded ports, so a missing ufw is a
-warning, not a requirement; on a **VPS** recommend it strongly (or the provider's firewall).
+**Docker bypasses ufw**: Coolify's panel (8000) and realtime ports (6001, 6002) stay reachable even with ufw.
+On a **VPS** the real protection is the **provider's firewall** allowing only 22, 80 and 443 — make sure the user
+sets it; ufw is only an extra layer. On a **home server** the router already blocks everything but the forwarded
+ports, so a missing ufw is just a warning. Never tell the user ufw protects the panel.
 Then `S diagnose …` again and show the new ✔.
 
 ### D · DNS and ports
 1. `S dns <domain> --expect-ip <public_ip from B>` → if not ok, follow `hints` (wildcard record, dynamic DNS
    client, propagation). Re-check when the user says it is done.
 2. Home server: ask the user to forward **80 and 443 only** to the server's LAN IP (`lan_ip` from B) on their
-   router (and to reserve that IP in DHCP). VPS: usually nothing to do.
-3. `S ports <domain or public IP> --private <panel port, 8000 by default>`:
+   router (and to reserve that IP in DHCP). VPS: the provider's firewall allows 22, 80 and 443 only.
+3. `S ports <domain or public IP>` (checks 80/443 open and 8000, 6001, 6002 private; pass `--private <port> 6001
+   6002` if the panel uses another port):
    - before installing, `closed` on 80/443 is the **good** answer (reaches the server, nothing listens yet);
      `filtered` means the forward/firewall is missing.
-   - the panel port must not be `open`.
+   - the panel ports must not be `open`. If they are on a VPS, the provider's firewall is missing (ufw does not
+     help: Docker bypasses it).
 
 ### E · Install Coolify
 Give the user the official command to run in their own ssh session:
@@ -83,26 +87,37 @@ curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
 ```
 Explain it takes a few minutes and installs Docker if needed. When they say it finished:
 `S health --url http://<lan or public IP>:8000 --ssh <user@host>` until `ok` (allow a couple of minutes).
-Then, **immediately**, the user opens the panel (LAN, VPN or `ssh -L 8000:localhost:8000 user@host` and
-`http://localhost:8000`) and creates the admin account — whoever opens it first owns it.
-Re-run `S ports … --private 8000`: 80/443 should now be `open`, 8000 not.
+Then, **immediately**, the user opens the panel (LAN, VPN, or on a VPS an ssh tunnel:
+`ssh -L 8000:localhost:8000 -L 6001:localhost:6001 -L 6002:localhost:6002 user@host` and `http://localhost:8000`)
+and creates the admin account — whoever opens it first owns it — and picks **this machine** (`localhost`) in the
+onboarding. Tell them not to give the panel a public domain.
+Re-run `S ports …`: 80/443 should now be `open`, 8000/6001/6002 not.
 
 ### F · Connect the API
 Browser steps for the user (step 8 of the guide):
-1. *Settings → Advanced → API access* on, and *Allowed IPs* = the network Claude Code runs from.
-2. *Security → API tokens → Create* with `read`, `write`, `deploy` and `delete`.
+1. *Settings → Advanced* (`/settings/advanced`): **API access** on, *Allowed IPs* = the network Claude Code
+   calls from, **Save**.
+2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): create a token with `read`, `write`, `deploy`, `delete`.
+   **VPS:** the API shares the panel's port, which the firewall closes, so Claude Code needs a private network to
+   reach it (Tailscale or WireGuard; URL `http://<vpn address>:8000`, *Allowed IPs* = the VPN range). Do not
+   suggest opening 8000 to the Internet.
 3. Store the token **without pasting it in the chat**. Copy it, then:
    - macOS: `! security add-generic-password -U -a "$USER" -s coolify-api-token -w "$(pbpaste)" && pbcopy < /dev/null`
-   - Linux and others: `! umask 077 && mkdir -p ~/.config/coolify-ops && <paste command of their clipboard tool> > ~/.config/coolify-ops/token`
-     (e.g. `xclip -o -selection clipboard`, `wl-paste`), or ask them to create the file with their editor.
+   - Linux and others: in their own terminal, `mkdir -p ~/.config/coolify-ops && chmod 700 ~/.config/coolify-ops`
+     and `nano ~/.config/coolify-ops/token && chmod 600 ~/.config/coolify-ops/token` (paste, save).
 4. Verify: `C init --url http://<panel address>:<port> --domain <domain> --ssh <user@host>` will fail with «No
    private GitHub App» until G is done — that failure already proves the token and the API work. Any other error
    (401, 403, connection) → see troubleshooting and fix it first.
 
-### G · GitHub App
-Browser steps (step 7 of the guide): *Sources → Add → GitHub App*, create it on GitHub, install it on the repos to
-deploy, and set the **Webhook URL** to a **public** address ending in `/webhooks/source/github/events`.
-Verify: `C init --url … --domain … --ssh … [--reserved <subdomains to keep>] [--projects-dir <folder>]` → `ok`.
+### G · GitHub App and webhooks
+The panel stays private, so only the webhook path is published, on the reserved subdomain `hooks` (step 7 of the
+guide):
+1. The user adds the dynamic configuration of step 7 (*Servers → localhost → Proxy → Dynamic Configurations*),
+   with their domain in the `Host` rule. Verify from outside: `curl -s -o /dev/null -w '%{http_code}'
+   https://hooks.<domain>/` must **not** be 200 (no panel). If it shows Coolify's login, stop: the panel is exposed.
+2. *Sources → Add → GitHub App*, create it on GitHub, install it on the repos to deploy only.
+3. On GitHub, the app's **Webhook URL** = `https://hooks.<domain>/webhooks/source/github/events`.
+Verify: `C init --url … --domain … --ssh … --reserved hooks [--projects-dir <folder>]` → `ok`.
 
 ### H · First deployment
 Hand over to `deploy-app`: suggest the example app of this repo — the user copies it into its own folder
@@ -119,6 +134,6 @@ Summarize: server (OS, arch, RAM), domain, what is public (80/443) and private (
 | Request | What to do |
 |---|---|
 | `diagnose <user@host>` | Phase B only, read-only, no follow-up questions |
-| `check` | `S health`, `C check`, `S dns <base_domain>`, `S ports <base_domain> --private <panel port>` with the values of `~/.config/coolify-ops/config.json`; one ✔/✘ table |
+| `check` | `S health`, `C check`, `S dns <base_domain>`, `S ports <base_domain>` (add `--private <panel port> 6001 6002` if the panel is not on 8000) with the values of `~/.config/coolify-ops/config.json`; one ✔/✘ table |
 
 See also `${CLAUDE_SKILL_DIR}/../deploy-app/reference/troubleshooting.md`.

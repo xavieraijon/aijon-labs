@@ -50,9 +50,9 @@ New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scr
 
 ## Setup (once)
 
-1. **Enable the API** in Coolify: *Settings → Advanced → API access → Enabled*, and set *Allowed IPs* to your
-   network (e.g. `192.168.1.0/24`).
-2. **Create a token** in *Security → API tokens* with `read`, `write`, `deploy` and `delete`.
+1. **Enable the API** in Coolify: *Settings → Advanced → API access → Enabled*, set *Allowed IPs* to your
+   network (e.g. `192.168.1.0/24`) and press *Save*.
+2. **Create a token** in *Keys & Tokens → API Tokens* (`/security/api-tokens`) with `read`, `write`, `deploy` and `delete`.
 3. **Store the token** (it never goes into a repo or the chat). Pick one:
    - macOS Keychain (copy the token first):
      `security add-generic-password -U -a "$USER" -s coolify-api-token -w "$(pbpaste)" && pbcopy < /dev/null`
