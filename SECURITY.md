@@ -25,7 +25,8 @@ issue worth reporting:
 - **No sudo, no passwords on servers.** `provision-server` only runs read-only commands over ssh with key
   authentication and never accepts an unknown host key on your behalf.
 - **Least privilege.** API tokens with only the permissions needed; `allowed-tools` limited to each skill's own
-  scripts; scripts run with `python3 -I` and use only the Python standard library.
+  scripts plus a few `gh` commands that only read from GitHub (git runs only through a script that has no push); scripts run with
+  `python3 -I` and use only the Python standard library.
 - **Private by default.** Databases are never made public and router or firewall ports are never opened.
 
 ## Supported versions

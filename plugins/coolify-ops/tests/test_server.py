@@ -138,6 +138,15 @@ def test_closed_before_install_is_fine(monkeypatch):
     assert r["ok"]
 
 
+def test_vps_without_firewall_is_flagged_before_install(monkeypatch):
+    # Nothing listens yet, so every port answers «closed»: only «filtered» proves a firewall is there
+    monkeypatch.setattr(server, "tcp_from_internet", lambda host, ports: {p: {"state": "closed"} for p in ports})
+    lenient = server.cmd_ports(argparse.Namespace(host="203.0.113.10", ports=[80, 443], private=[8000]))
+    strict = server.cmd_ports(argparse.Namespace(host="203.0.113.10", ports=[80, 443], private=[8000],
+                                                 require_filtered=True))
+    assert lenient["ok"] and not strict["ok"] and any("no firewall" in h for h in strict["hints"])
+
+
 # ------------------------------------------------------------------ health
 
 

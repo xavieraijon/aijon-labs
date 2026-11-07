@@ -182,12 +182,22 @@ def save_to_registry(name: str, data: dict) -> None:
     write_json(REGISTRY, reg)
 
 
+COOLIFY_UUID = re.compile(r"[a-z0-9]{24}")
+
+
 def resolve_app(name_or_uuid: str) -> str:
-    """Accept a name from the local registry or a Coolify uuid."""
+    """Accept a name from the local registry, a Coolify uuid, or the name of an app on the server."""
     reg = registry()
     if name_or_uuid in reg and reg[name_or_uuid].get("app_uuid"):
         return reg[name_or_uuid]["app_uuid"]
-    return name_or_uuid
+    if COOLIFY_UUID.fullmatch(name_or_uuid):
+        return name_or_uuid
+    matches = [ap for ap in _apps() if ap.get("name") == name_or_uuid or ap.get("uuid") == name_or_uuid]
+    if len(matches) == 1:
+        return matches[0]["uuid"]
+    if not matches:
+        raise Error(f"No app named {name_or_uuid!r} (see «status» for names and uuids)")
+    raise Error(f"Several apps are named {name_or_uuid!r}: use the uuid ({', '.join(m['uuid'] for m in matches)})")
 
 
 def host_of(url_or_host: str) -> str:
@@ -372,16 +382,60 @@ def cmd_env_push(a):
     path = Path(a.file).expanduser()
     if not path.exists():
         raise Error(f"{path} does not exist")
-    result = []
+    result, empty = [], []
+    pairs = _read_env_file(path)
+    if a.only:
+        missing = sorted(set(a.only) - {k for k, _ in pairs})
+        if missing:
+            raise Error(f"Not in {path.name}: {', '.join(missing)}")
+        pairs = [(k, v) for k, v in pairs if k in a.only]
+    for key, value in pairs:
+        if not value:  # never overwrite a value (e.g. DATABASE_URL set by create-postgres) with an empty one
+            empty.append(key)
+            continue
+        public = key.startswith(PUBLIC_PREFIXES)
+        result.append({**_set_env(app, key, value, secret=not public), "public": public})
+    return {"ok": True, "variables": result, "skipped_empty": empty}
+
+
+def _read_env_file(path: Path) -> list[tuple[str, str]]:
+    pairs = []
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.removeprefix("export ").split("=", 1)
-        key, value = key.strip(), value.strip().strip("\"'")
-        public = key.startswith(PUBLIC_PREFIXES)
-        result.append({**_set_env(app, key, value, secret=not public), "public": public})
-    return {"ok": True, "variables": result}
+        pairs.append((key.strip(), value.strip().strip("\"'")))
+    return pairs
+
+
+ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+APP_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+
+
+def cmd_env_template(a):
+    """Create or extend secrets/<app>.env with empty keys for the user to fill in. Never touches existing values."""
+    if not APP_NAME.fullmatch(a.app):
+        raise Error("App name: lowercase letters, digits and hyphens")
+    bad = [k for k in a.keys if not ENV_KEY.fullmatch(k)]
+    if bad:
+        raise Error(f"Invalid variable names: {', '.join(bad)}")
+    folder = CONFIG_DIR / "secrets"
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    path = folder / f"{a.app}.env"
+    existing = dict(_read_env_file(path)) if path.exists() else {}
+    added = [k for k in dict.fromkeys(a.keys) if k not in existing]
+    if added:
+        text = path.read_text() if path.exists() else ""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        path.write_text(text + "".join(f"{k}=\n" for k in added))
+    path.touch()
+    path.chmod(0o600)
+    keys = {**existing, **{k: "" for k in added}}
+    return {"ok": True, "file": str(path), "added": added, "already_present": [k for k in a.keys if k in existing],
+            "empty": sorted(k for k, v in keys.items() if not v)}
 
 
 def cmd_env_list(a):
@@ -403,6 +457,28 @@ def cmd_env_delete(a):
     for e in envs:
         api("DELETE", f"/applications/{app}/envs/{e['uuid']}")
     return {"ok": True, "key": a.key, "deleted": len(envs)}
+
+
+def cmd_protect(a):
+    """Basic auth handled by Coolify's proxy. The password is generated here and stored in secrets/<app>.access."""
+    app = resolve_app(a.app)
+    if a.off:
+        api("PATCH", f"/applications/{app}", {"is_http_basic_auth_enabled": False})
+        return {"ok": True, "protected": False, "note": "redeploy for the change to take effect"}
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", a.user):
+        raise Error("User: letters, digits, dot, hyphen or underscore")
+    name = a.app if APP_NAME.fullmatch(a.app) else app
+    password = random_password(24)
+    api("PATCH", f"/applications/{app}", {"is_http_basic_auth_enabled": True, "http_basic_auth_username": a.user,
+                                         "http_basic_auth_password": password})
+    folder = CONFIG_DIR / "secrets"
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    path = folder / f"{name}.access"
+    path.write_text(f"user={a.user}\npassword={password}\n")
+    path.chmod(0o600)
+    return {"ok": True, "protected": True, "user": a.user, "credentials_file": str(path),
+            "note": "redeploy for the change to take effect; the password is only in that file"}
 
 
 def cmd_deploy(a):
@@ -457,12 +533,15 @@ def cmd_logs(a):
 
 
 def cmd_rollback(a):
-    if not a.confirmed:
-        raise Error("Rollback requires --confirmed (the user must approve it first).")
+    """Without --image: list the images (read-only). With --image: roll back (needs --confirmed)."""
     app = resolve_app(a.app)
     if not a.image:
-        return {"ok": True, "available_images": api("GET", f"/applications/{app}/rollback-images")}
-    return {"ok": True, **api("POST", f"/applications/{app}/rollback", {"docker_tag": a.image})}
+        r = api("GET", f"/applications/{app}/rollback-images") or {}
+        return {"ok": True, "current": r.get("current"), "images": r.get("images", [])}
+    if not a.confirmed:
+        raise Error("Rollback requires --confirmed (the user must approve it first).")
+    r = api("POST", f"/applications/{app}/rollback", {"commit": a.image}) or {}
+    return {"ok": True, "message": r.get("message"), "deployment_uuid": r.get("deployment_uuid")}
 
 
 GRACE_WITHOUT_SSH = 45  # seconds to let Coolify's background cleanup run when it cannot be observed
@@ -536,14 +615,21 @@ def _wait_for_cleanup(uuids: list[str], timeout: int = 180) -> tuple[bool, str]:
 def cmd_decommission(a):
     if not a.confirmed:
         raise Error("Decommission requires --confirmed (the user must approve it first).")
-    name = a.app
     reg = registry()
-    app = resolve_app(name)
+    app = resolve_app(a.app)
+    # The registry entry may be keyed by another name than the one given (e.g. the app was given by uuid)
+    name = a.app if a.app in reg else next((k for k, v in reg.items() if v.get("app_uuid") == app), a.app)
+    entry = reg.get(name, {})
+    unknown = [what for what, flag, key in (("database", a.with_db, "db_uuid"), ("project", a.with_project, "project_uuid"))
+               if flag and not entry.get(key)]
+    if unknown:  # refuse before deleting anything, so nothing is left half done
+        raise Error(f"The {' and '.join(unknown)} of this app are not in the local registry (apps.json): nothing was "
+                    "deleted. Run without --with-db/--with-project and delete them in Coolify, or by their own uuid")
     api("DELETE", f"/applications/{app}", query={"delete_configurations": "true", "delete_volumes": "true",
                                                    "docker_cleanup": "true", "delete_connected_networks": "true"})
     deleted = {"app": app}
     pending = [f"/applications/{app}"]
-    if a.with_db and reg.get(name, {}).get("db_uuid"):
+    if a.with_db:
         api("DELETE", f"/databases/{reg[name]['db_uuid']}", query={"delete_volumes": "true"})
         deleted["db"] = reg[name]["db_uuid"]
         pending.append(f"/databases/{reg[name]['db_uuid']}")
@@ -560,7 +646,7 @@ def cmd_decommission(a):
         target = (read_json(CONFIG, {}) or {}).get("ssh")
         removed = _remove_app_images(target, app) if target else None
         deleted["images"] = removed if removed is not None else "left to Coolify's scheduled Docker cleanup"
-    if not deleted.get("warning") and a.with_project and reg.get(name, {}).get("project_uuid"):
+    if not deleted.get("warning") and a.with_project:
         try:
             api("DELETE", f"/projects/{reg[name]['project_uuid']}")
             deleted["project"] = reg[name]["project_uuid"]
@@ -569,6 +655,13 @@ def cmd_decommission(a):
     if name in reg:
         del reg[name]
         write_json(REGISTRY, reg)
+    if APP_NAME.fullmatch(name):  # the app is gone: its local variable values and credentials are useless now
+        removed = [f for f in (CONFIG_DIR / "secrets" / f"{name}.env", CONFIG_DIR / "secrets" / f"{name}.access")
+                   if f.exists()]
+        for f in removed:
+            f.unlink()
+        if removed:
+            deleted["local_files"] = [str(f) for f in removed]
     return {"ok": True, "deleted": deleted}
 
 
@@ -620,8 +713,18 @@ def parser() -> argparse.ArgumentParser:
     c = s.add_parser("env-list", help="variable names (never values)"); c.add_argument("app")
     c.set_defaults(f=cmd_env_list)
 
-    c = s.add_parser("env-push", help="upload KEY=value lines from a file (values are never printed)")
-    c.add_argument("app"); c.add_argument("file"); c.set_defaults(f=cmd_env_push)
+    c = s.add_parser("env-template", help="create secrets/<app>.env with empty keys for the user to fill in")
+    c.add_argument("app"); c.add_argument("keys", nargs="+"); c.set_defaults(f=cmd_env_template)
+
+    c = s.add_parser("env-push", help="upload KEY=value lines from a file (values are never printed; empty ones skipped)")
+    c.add_argument("app"); c.add_argument("file")
+    c.add_argument("--only", nargs="+", metavar="KEY", help="upload only these keys (others in the file are left as they are)")
+    c.set_defaults(f=cmd_env_push)
+
+    c = s.add_parser("protect", help="HTTP basic auth on the app's domain; the password is saved locally, never printed")
+    c.add_argument("app"); c.add_argument("--user", default="admin")
+    c.add_argument("--off", action="store_true", help="remove the protection")
+    c.set_defaults(f=cmd_protect)
 
     c = s.add_parser("env-delete"); c.add_argument("app"); c.add_argument("key")
     c.add_argument("--confirmed", action="store_true"); c.set_defaults(f=cmd_env_delete)
@@ -638,7 +741,8 @@ def parser() -> argparse.ArgumentParser:
     c = s.add_parser("logs"); c.add_argument("app"); c.add_argument("--lines", type=int, default=100)
     c.set_defaults(f=cmd_logs)
 
-    c = s.add_parser("rollback"); c.add_argument("app"); c.add_argument("--image")
+    c = s.add_parser("rollback", help="list rollback images; with --image and --confirmed, roll back")
+    c.add_argument("app"); c.add_argument("--image")
     c.add_argument("--confirmed", action="store_true"); c.set_defaults(f=cmd_rollback)
 
     c = s.add_parser("decommission", help="delete an app (optionally its database and project)")

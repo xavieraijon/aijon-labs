@@ -158,8 +158,12 @@ stay private, so we publish **only the webhook path** on a dedicated subdomain, 
            servers:
              - url: "http://coolify:8080"
    ```
-   Any other path on `hooks.example.org` returns an error page: the panel is not exposed. Check it from outside
-   with `curl -I https://hooks.example.org/` (it must **not** show Coolify's login page).
+   Any other path on `hooks.example.org` returns an error page: the panel is not exposed. Check it **from
+   outside your network** — on a home server, a check from inside the LAN goes through NAT loopback and proves
+   nothing. Open `https://hooks.example.org/` on your phone with Wi-Fi off, or run from any machine outside it
+   `curl -s -o /dev/null -w '%{http_code}\n' https://hooks.example.org/`. Expected: an error code (404 or 503),
+   **never 200** and never Coolify's login page. If the login page shows, remove the configuration and check the
+   `rule` line.
 2. **Create the GitHub App.** *Sources → Add → GitHub App*, follow the link to GitHub and let it create the app;
    Coolify receives the credentials automatically. Install it on your account choosing **only the repositories**
    you will deploy (you can add more later).

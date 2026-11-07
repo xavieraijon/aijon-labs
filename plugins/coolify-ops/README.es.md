@@ -35,10 +35,11 @@ todo en castellano: Claude te responde en tu idioma.
 | SPA: Angular, Vite (React/Vue/Svelte), Create React App | `spa-nginx` |
 | Web estática | `static-nginx` |
 | PHP sencillo | `php-apache` |
-| Cualquier proyecto con su propio `Dockerfile` | se usa tal cual |
+| Cualquier proyecto de un solo servicio con su propio `Dockerfile` (de cualquier framework) | se usa tal cual |
 
 Con PostgreSQL privado opcional. **Todavía no** admite (la skill para y lo explica): monorepos, apps de varios
-servicios, Django, Laravel/Symfony ni el SSR de Nuxt/Astro/SvelteKit.
+servicios, apps que necesitan MySQL/MariaDB, MongoDB o Redis y, salvo que traigan su propio `Dockerfile`, Django,
+Laravel/Symfony, Nuxt, Astro y SvelteKit (estáticos o con SSR).
 
 ¿Nuevo en Coolify? Empieza por [Coolify desde cero](../../docs/es/coolify-desde-cero.md) antes de la
 configuración de abajo, o deja que te guíe la skill `provision-server`.
@@ -84,7 +85,7 @@ el comando para que lo lances tú (`! git push`).
 |---|---|
 | `~/.config/coolify-ops/config.json` | URL de Coolify, dominio base, uuids del servidor y de la GitHub App, ssh, carpeta de proyectos, límites por defecto |
 | `~/.config/coolify-ops/apps.json` | Registro de las apps desplegadas (nombre → uuids, dominio) |
-| `~/.config/coolify-ops/secrets/<app>.env` | Valores de las variables de cada app (`chmod 600`) |
+| `~/.config/coolify-ops/secrets/<app>.env` | Valores de las variables de cada app (`chmod 600`; lo crea `coolify.py env-template` con las claves vacías, y los valores vacíos nunca se suben) |
 
 Cambia la carpeta con `COOLIFY_OPS_HOME`. Una configuración de la v0.1 en `~/.config/coolify-deploy/` se migra
 sola.
@@ -96,6 +97,8 @@ sola.
 - Busca secretos en los ficheros que se subirían y para si encuentra alguno.
 - Contraseñas y tokens enmascarados en toda la salida; los valores de las variables nunca se muestran.
 - Límites de CPU y memoria en todas las apps.
+- Usuario y contraseña opcionales en el dominio de una app (`coolify.py protect`); la contraseña se genera y se
+  guarda en `~/.config/coolify-ops/secrets/<app>.access`.
 
 ## Scripts
 
@@ -104,6 +107,7 @@ Todos devuelven JSON y se pueden usar a mano. Están en `skills/deploy-app/scrip
 | Script | Uso |
 |---|---|
 | `coolify.py` | Cliente de la API (`coolify.py --help` lista las órdenes) |
+| `repo.py state\|init\|commit <ruta>` | Git local para la skill: estado, `git init` con `.gitignore` y commit tras buscar secretos. No tiene push |
 | `analyze.py <ruta>` | Análisis del proyecto; `--secrets` solo busca secretos |
 | `prepare.py <ruta>` | Escribe Dockerfile, `.dockerignore` y `nginx.conf` desde las plantillas |
 | `local_check.py <ruta> --port N` | Build y prueba con Docker en local; limpia siempre |
@@ -115,7 +119,7 @@ Y en `skills/provision-server/scripts/`:
 |---|---|
 | `server.py diagnose usuario@host` | Diagnóstico del servidor (solo lectura): sistema, arquitectura, RAM, disco, Docker, Coolify, puertos en uso, seguridad |
 | `server.py dns ejemplo.org` | Comprueba el DNS comodín en un resolvedor público |
-| `server.py ports ejemplo.org --private 8000` | 80/443 accesibles desde Internet y el puerto del panel cerrado |
+| `server.py ports 203.0.113.10 --private 8000` | 80/443 accesibles desde Internet y el puerto del panel cerrado (`--require-filtered` en un VPS: bloqueado por un cortafuegos) |
 | `server.py health` | `/api/health` de Coolify y sus contenedores |
 
 Ver también los [problemas frecuentes](skills/deploy-app/reference/troubleshooting.md) (en inglés) y la

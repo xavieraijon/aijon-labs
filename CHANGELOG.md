@@ -6,6 +6,53 @@ All notable changes to the plugins of this marketplace. The format is based on
 
 ## coolify-ops
 
+### 0.2.1 — 2026-11-07
+
+#### Fixed
+- `rollback` works again: Coolify 4.6 only accepts `{"commit": "<tag>"}` and rejected the `docker_tag` field
+  with a 422. The rollback now returns its `deployment_uuid`, so the skill waits for it and verifies the app.
+- `env-push` no longer uploads empty values. An empty `DATABASE_URL=` line used to overwrite the URL that
+  `create-postgres` had just set. Skipped keys are reported by name (`skipped_empty`).
+- Commands that take an app name now find apps missing from the local `apps.json` by looking them up on the
+  server. Ambiguous names ask for the uuid.
+- `provision-server` no longer depends on files that are not installed with the plugin. The hardening commands,
+  the GitHub webhook proxy configuration and the example app are in `reference/server-setup.md`, and the guide
+  is linked by URL.
+- `provision-server` on a VPS: the health check no longer targets the panel port closed by the firewall, and
+  the port check targets the public IP instead of the bare domain.
+- `provision-server` on a VPS no longer lets the install start without a provider firewall: before installing,
+  the panel ports must be `filtered`, not just `closed` (`server.py ports --require-filtered`).
+- `decommission --with-db/--with-project` refuses before deleting anything when the database or project is not
+  in the local registry, instead of silently skipping them; the registry entry is also found by uuid.
+- A project that was not a git repository is now committed whole (with a `.gitignore`) before its first push,
+  and a new repository is added to the GitHub App's access before deploying.
+
+#### Added
+- `repo.py`: the skill's only way to use git (`state`, `init` with a `.gitignore`, `commit` after a secrets scan).
+  It has no push. `git` is no longer in `allowed-tools`, so a push can never be approved by the skill's
+  permissions (the old `git -C *` pattern also matched `git -C <path> push`).
+- `protect` command: user and password on an app's domain (Coolify's basic auth). The password is generated
+  locally, saved in `secrets/<app>.access` (mode 600) and never printed.
+- `env-push --only KEY…`: upload only some keys, so values changed in the panel are not overwritten.
+- `provision-server` reference blocks for users without an ssh key, working as root on a fresh VPS, and a private
+  network (Tailscale) to reach the API of a VPS.
+- `env-template` command: creates `secrets/<app>.env` with empty keys (mode 600) without touching existing values.
+- `analyze.py` blocks apps that need MySQL/MariaDB, MongoDB or Redis (only PostgreSQL can be created).
+
+#### Changed
+- Git remotes are printed without any credentials they contain, and GitHub repository names may contain dots.
+- `decommission` also deletes the app's local `secrets/<app>.env` and `.access` files.
+- `verify.py --protected`: for an app with a user and password, its routes must answer 401.
+- A project with its own `Dockerfile` is deployed as is whatever its framework; the docs and the skill now agree.
+- Listing rollback images is read-only and no longer needs `--confirmed`; rolling back still does.
+- `deploy-app`: clear steps for folders without git or a GitHub remote, for local checks of apps that need a
+  database, and for each result of the server check.
+- `provision-server`: what to do if a password is pasted in the chat; also triggers on «check my server»;
+  `check` works without a configuration.
+- Spanish security policy completed (reporting steps, supported versions); both versions now describe what
+  `allowed-tools` really allows.
+- The guide's webhook check is done from outside the network and says which answers are expected.
+
 ### 0.2.0 — 2026-11-07
 
 First public release.

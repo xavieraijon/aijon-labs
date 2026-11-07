@@ -2,21 +2,36 @@
 
 *[In English](../../SECURITY.md)*
 
-Este repositorio es **público**. Reglas para todo lo que se añada:
+## Avisar de una vulnerabilidad
 
-- **Ningún dato personal ni secreto**: nada de IPs, dominios, uuids, correos, tokens ni contraseñas. Todo eso vive
-  en la configuración local del usuario (`~/.config/<plugin>/`, Llavero de macOS).
-- **Los secretos no pasan por el chat:** se leen del Llavero o de ficheros con `chmod 600`, y los scripts los
-  enmascaran en su salida.
-- **Las acciones irreversibles se confirman siempre** (borrar, rollback, force push), aunque el resto del flujo
-  sea automático.
-- **Lo que publica código lo ejecuta el usuario** (`git push`, crear repos): las skills preparan el comando.
-- **Mínimo privilegio:** tokens con los permisos justos; `allowed-tools` limitado a los scripts de la skill.
-- **Scripts con `python3 -I`** y sin dependencias externas.
-- **Sin `sudo` ni contraseñas en los servidores:** `provision-server` solo ejecuta órdenes de lectura por ssh con
-  clave y nunca acepta una clave de host desconocida por el usuario.
-- **Privado por defecto:** las bases de datos nunca se hacen públicas y nunca se abren puertos del router ni del
+Por favor, **no abras un issue público** para un problema de seguridad. Usa el aviso privado de GitHub:
+*Security → Report a vulnerability* en este repositorio. Te responderemos lo antes posible; deja un tiempo razonable
+para corregirlo antes de hacerlo público.
+
+Indica qué está afectado (plugin, skill, script), cómo reproducirlo y el impacto que ves. No incluyas nunca tokens,
+contraseñas ni datos personales reales en el aviso: tápalos.
+
+## Qué prometen estos plugins
+
+Las skills actúan sobre tus servidores, así que siguen unas reglas por diseño. Un fallo que rompa alguna de ellas es
+un problema de seguridad y merece un aviso:
+
+- **Ningún secreto en el chat ni en la salida.** Los tokens de la API se leen del Llavero de macOS, de un fichero
+  con `chmod 600` o de una variable de entorno; las contraseñas y las cadenas de conexión se enmascaran; los valores
+  de las variables nunca se muestran.
+- **Nada personal en el repositorio.** Las IPs, dominios, uuids y secretos de cada usuario viven en
+  `~/.config/<plugin>/`, nunca en el repo.
+- **Las acciones irreversibles preguntan siempre** (borrar, rollback, force push), aunque el resto del flujo sea
+  automático.
+- **Publicar código lo hace el usuario.** Las skills nunca ejecutan `git push` ni crean repositorios con push.
+- **Sin `sudo` ni contraseñas en los servidores.** `provision-server` solo ejecuta órdenes de lectura por ssh con
+  clave y nunca acepta una clave de host desconocida en tu nombre.
+- **Mínimo privilegio.** Tokens de la API con los permisos justos; `allowed-tools` limitado a los scripts de cada
+  skill y a unas pocas órdenes de `gh` que solo leen de GitHub (git solo se usa a través de un script que no tiene push);
+  los scripts se ejecutan con `python3 -I` y solo usan la biblioteca estándar de Python.
+- **Privado por defecto.** Las bases de datos nunca se hacen públicas y nunca se abren puertos del router ni del
   cortafuegos.
 
-¿Has encontrado un problema de seguridad? **No abras un issue público**: sigue [SECURITY.md](../../SECURITY.md)
-(aviso privado por GitHub).
+## Versiones con soporte
+
+Solo la última versión publicada de cada plugin recibe correcciones.

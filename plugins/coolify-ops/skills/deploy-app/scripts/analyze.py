@@ -260,7 +260,8 @@ def analyze(root: Path) -> dict:
     # --- git
     if (root / ".git").exists():
         remote = git(root, "remote", "get-url", "origin")
-        m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", remote)
+        remote = re.sub(r"//[^/@]+@", "//", remote)  # never print credentials stored in the URL
+        m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", remote)
         status = git(root, "status", "--porcelain")
         ahead = git(root, "rev-list", "--count", "@{u}..HEAD") if remote else ""
         res["git"] = {"remote": m.group(1) if m else (remote or None), "branch": git(root, "rev-parse", "--abbrev-ref", "HEAD"),
@@ -298,6 +299,9 @@ def analyze(root: Path) -> dict:
         expose = re.findall(r"^\s*EXPOSE\s+(\d+)", read(dockerfile), re.M | re.I)
         stack["existing_dockerfile"] = True
         stack["template"] = None
+        if stack.pop("warning_framework", None):  # the project's own Dockerfile is used as is
+            warnings.append(f"{stack.get('framework') or 'this stack'} has no template: the project's own Dockerfile "
+                            "is used as is (check its EXPOSE and that it listens on 0.0.0.0)")
         if expose:
             stack["port"] = int(expose[-1])
         else:
@@ -325,6 +329,10 @@ def analyze(root: Path) -> dict:
         if "DATABASE_URL" not in names:  # with Supabase the database is hosted, unless it uses its own URL
             dbs = [d for d in dbs if d != "postgresql"]
     res["databases"] = dbs
+    others = [d for d in dbs if d != "postgresql"]
+    if others:
+        blockers.append(f"uses {', '.join(others)}: only PostgreSQL can be created by this skill "
+                        "(create it in Coolify by hand, or remove the dependency if it is unused)")
     res["has_login_estimate"] = any(lib in manifests for lib in LOGIN_LIBS)
     paid = sorted({p for p in PAID_SERVICE_HINTS if p in manifests})
     res["paid_services_estimate"] = paid

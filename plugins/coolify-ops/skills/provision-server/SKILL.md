@@ -1,15 +1,18 @@
 ---
 name: provision-server
-description: Guide the user step by step through setting up a self-hosted Coolify server (VPS or home server) and connecting it to Claude Code — read-only diagnosis over SSH, wildcard DNS, ports reachable from the Internet, hardening, the official install, admin account, GitHub App, API token — checking every step and never handling passwords or sudo. Use when the user wants to install or set up Coolify, prepare a server or VPS for self-hosting, or when deploy-app finds no Coolify configuration. Also triggers on Spanish requests such as «instala Coolify», «prepara mi servidor» or «monta Coolify en mi VPS».
+description: Guide the user step by step through setting up a self-hosted Coolify server (VPS or home server) and connecting it to Claude Code — read-only diagnosis over SSH, wildcard DNS, ports reachable from the Internet, hardening, the official install, admin account, GitHub App, API token — checking every step and never handling passwords or sudo. Use when the user wants to install or set up Coolify, prepare a server or VPS for self-hosting, check the health or Internet exposure (open ports, DNS) of an existing Coolify server, or when deploy-app finds no Coolify configuration. Also triggers on Spanish requests such as «instala Coolify», «prepara mi servidor» or «monta Coolify en mi VPS».
 argument-hint: "[user@host] [domain] | diagnose <user@host> | check"
 allowed-tools: Bash(python3 -I ${CLAUDE_SKILL_DIR}/scripts/*), Bash(python3 -I ${CLAUDE_SKILL_DIR}/../deploy-app/scripts/coolify.py *), Bash(python3 -I ${CLAUDE_SKILL_DIR}/../deploy-app/scripts/verify.py *)
 ---
 
 # Provision a Coolify server
 
-Takes the user from a bare machine to a Coolify server that `deploy-app` can use. It follows the written guide
-(`docs/en/coolify-from-scratch.md` in the repo root, `docs/es/coolify-desde-cero.md` in Spanish) and **checks**
-each step instead of trusting it was done.
+Takes the user from a bare machine to a Coolify server that `deploy-app` can use. It follows the written guide «Coolify from scratch»
+(https://github.com/xavieraijon/aijon-labs/blob/main/docs/en/coolify-from-scratch.md; Spanish:
+https://github.com/xavieraijon/aijon-labs/blob/main/docs/es/coolify-desde-cero.md) and **checks** each step
+instead of trusting it was done. The guide is not installed with the plugin: every block the user must run
+(hardening, webhook proxy configuration, example app) is in `${CLAUDE_SKILL_DIR}/reference/server-setup.md` —
+use those exact blocks, never write them from memory.
 
 Scripts (all print JSON, all read-only):
 
@@ -17,7 +20,7 @@ Scripts (all print JSON, all read-only):
 |---|---|
 | `S diagnose <user@host>` | OS, architecture, RAM, disk, Docker, Coolify state, ports in use, ssh password login, firewall, automatic updates, public/LAN IP |
 | `S dns <domain> [--expect-ip IP]` | Does a random `*.domain` name resolve on a public resolver, and to which IP |
-| `S ports <host> [--ports 80 443] [--private 8000 6001 6002]` | TCP reachability from 3 countries (check-host.net): `open`, `closed` (reaches the server, nothing listens), `filtered` (blocked) |
+| `S ports <host> [--ports 80 443] [--private 8000 6001 6002]` | TCP reachability from 3 check-host.net nodes abroad: `open`, `closed` (reaches the server, nothing listens), `filtered` (blocked) |
 | `S health [--url URL] [--ssh user@host]` | `/api/health` answers and Coolify's containers are healthy |
 | `C check`, `C init …` | Coolify API (from `deploy-app`): token valid, server and GitHub App discovered |
 
@@ -30,7 +33,9 @@ Scripts (all print JSON, all read-only):
 
 1. **Never run anything with `sudo` and never ask for, receive or type a password.** Commands that need root are
    given to the user to run **in their own terminal, inside an `ssh` session** — not with `!`, because `!` cannot
-   answer a password prompt. Then verify with a script.
+   answer a password prompt. Then verify with a script. If the user pastes or offers a password: do not repeat it,
+   use it or store it; tell them to change it, since it is now in the chat history; and go on with key login
+   (they run `ssh-copy-id` themselves, see `reference/server-setup.md`).
 2. **Never change the server yourself.** The only remote commands are the scripts' read-only ones over ssh with
    key authentication (`BatchMode`, it never prompts).
 3. **Never accept an unknown ssh host key on the user's behalf.** If the script says the key is unknown, ask the
@@ -46,20 +51,27 @@ Scripts (all print JSON, all read-only):
 
 ### A · Gather
 Ask (in one message) only what is missing: VPS or home server, `user@host` for ssh, and the domain they will use
-(own domain or a dynamic DNS name such as DuckDNS). If they have no domain yet, explain the two options from step 3
-of the guide and continue with A–B meanwhile.
-If ssh does not work yet: for a key error give `ssh-copy-id user@host`; for an unknown key, rule 3.
+(own domain or a dynamic DNS name such as DuckDNS). If they have no domain yet, explain the two options — a
+domain of their own with a wildcard `A` record `*.domain` → public IP, or a free dynamic DNS name with wildcard
+support such as DuckDNS (best for a home server whose IP changes) — and continue with A–B meanwhile.
+If ssh does not work yet: no key pair or only a root password → the blocks «No ssh key yet» and «Key-only ssh»
+of `reference/server-setup.md`; for an unknown host key, rule 3.
 
 ### B · Diagnose
 `S diagnose <user@host>` and present `checks` as a ✔/✘ table, then `blockers` and `warnings`.
 - `blockers` (32-bit system, < 2 GB RAM, Coolify ports taken by another service): stop and explain.
-- `stage` = `installed` → tell the user and jump to F. `installed-unhealthy` → `S health --ssh …` and show what
+- `stage` = `installed` → Coolify is already there, but the earlier phases may not be done. Still: offer C if its
+  warnings apply; run D1 (DNS) and D3 (ports); ask the user to confirm the admin account exists (if not, step E's
+  «immediately» applies now). Then `C check`: `ok` → the API is connected, skip to G (or H if `C init` also
+  succeeds); no configuration or an error → continue at F. `installed-unhealthy` → `S health --ssh …` and show what
   is wrong (see troubleshooting) before anything else.
 - Home server (`behind_nat`): show `cgnat_hint` and ask the user to compare with their router's WAN IP. CGNAT
-  means port forwarding cannot work: stop and explain the options from step 2 of the guide.
+  means port forwarding cannot work: stop and explain the options («CGNAT» in `reference/server-setup.md`).
+  On a VPS ignore `behind_nat`: some providers use NAT, and the provider's public IP is the one that counts.
 
 ### C · Harden (if warnings mention ssh passwords, firewall or automatic updates)
-Give the user the block from step 4 of the guide, only the lines they still need, to run in their own ssh
+Give the user the blocks «Key-only ssh», «Automatic security updates» and «Firewall» from
+`reference/server-setup.md`, only the lines they still need, to run in their own ssh
 session. Warn before the ssh line: they must have key login working first or they will lock themselves out
 (keeping the current session open while testing a new one is the safe way).
 **Docker bypasses ufw**: Coolify's panel (8000) and realtime ports (6001, 6002) stay reachable even with ufw.
@@ -73,12 +85,14 @@ Then `S diagnose …` again and show the new ✔.
    client, propagation). Re-check when the user says it is done.
 2. Home server: ask the user to forward **80 and 443 only** to the server's LAN IP (`lan_ip` from B) on their
    router (and to reserve that IP in DHCP). VPS: the provider's firewall allows 22, 80 and 443 only.
-3. `S ports <domain or public IP>` (checks 80/443 open and 8000, 6001, 6002 private; pass `--private <port> 6001
-   6002` if the panel uses another port):
+3. `S ports <public_ip from B>` (the bare base domain may not point at the server: only `*.domain` does; checks
+   80/443 open and 8000, 6001, 6002 private; pass `--private <port> 6001 6002` if the panel uses another port).
+   **On a VPS add `--require-filtered`.**
    - before installing, `closed` on 80/443 is the **good** answer (reaches the server, nothing listens yet);
      `filtered` means the forward/firewall is missing.
-   - the panel ports must not be `open`. If they are on a VPS, the provider's firewall is missing (ufw does not
-     help: Docker bypasses it).
+   - the panel ports must not be `open`. On a VPS before installing they must be **`filtered`**: `closed` means
+     the packets reach the machine, so there is no provider firewall and the panel would be public the moment
+     Coolify starts. Do not go to E until they are `filtered` (ufw does not help: Docker bypasses it).
 
 ### E · Install Coolify
 Give the user the official command to run in their own ssh session:
@@ -86,7 +100,10 @@ Give the user the official command to run in their own ssh session:
 curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
 ```
 Explain it takes a few minutes and installs Docker if needed. When they say it finished:
-`S health --url http://<lan or public IP>:8000 --ssh <user@host>` until `ok` (allow a couple of minutes).
+`S health` until `ok` (allow a couple of minutes): home server `--url http://<lan_ip>:8000 --ssh <user@host>`;
+**VPS** `--ssh <user@host>` only (port 8000 is closed by the firewall), or `--url http://localhost:8000` while the
+user's ssh tunnel (below) is open. Read the parts separately: `http.ok` (panel answers) and `containers_ok`; a
+`containers_error` means the ssh user cannot run `docker` (not in the docker group) — then rely on `http.ok`.
 Then, **immediately**, the user opens the panel (LAN, VPN, or on a VPS an ssh tunnel:
 `ssh -L 8000:localhost:8000 -L 6001:localhost:6001 -L 6002:localhost:6002 user@host` and `http://localhost:8000`)
 and creates the admin account — whoever opens it first owns it — and picks **this machine** (`localhost`) in the
@@ -99,8 +116,9 @@ Browser steps for the user (step 8 of the guide):
    calls from, **Save**.
 2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): create a token with `read`, `write`, `deploy`, `delete`.
    **VPS:** the API shares the panel's port, which the firewall closes, so Claude Code needs a private network to
-   reach it (Tailscale or WireGuard; URL `http://<vpn address>:8000`, *Allowed IPs* = the VPN range). Do not
-   suggest opening 8000 to the Internet.
+   reach it: follow «Private network for the API (VPS)» in `reference/server-setup.md` (Tailscale; URL
+   `http://<server's tailnet address>:8000`, *Allowed IPs* = `100.64.0.0/10`). Do not suggest opening 8000 to the
+   Internet, and do not rely on the ssh tunnel for the API (untested with *Allowed IPs*).
 3. Store the token **without pasting it in the chat**. Copy it, then:
    - macOS: `! security add-generic-password -U -a "$USER" -s coolify-api-token -w "$(pbpaste)" && pbcopy < /dev/null`
    - Linux and others: in their own terminal, `mkdir -p ~/.config/coolify-ops && chmod 700 ~/.config/coolify-ops`
@@ -112,17 +130,18 @@ Browser steps for the user (step 8 of the guide):
 ### G · GitHub App and webhooks
 The panel stays private, so only the webhook path is published, on the reserved subdomain `hooks` (step 7 of the
 guide):
-1. The user adds the dynamic configuration of step 7 (*Servers → localhost → Proxy → Dynamic Configurations*),
-   with their domain in the `Host` rule. Verify from outside: `curl -s -o /dev/null -w '%{http_code}'
-   https://hooks.<domain>/` must **not** be 200 (no panel). If it shows Coolify's login, stop: the panel is exposed.
+1. The user adds the configuration «GitHub webhooks only» from `reference/server-setup.md` (*Servers → localhost →
+   Proxy → Dynamic Configurations*), with their domain in the `Host` rule. The user checks it **from outside
+   their network** as that section explains: it must **not** answer 200. If Coolify's login shows, stop: the panel
+   is exposed.
 2. *Sources → Add → GitHub App*, create it on GitHub, install it on the repos to deploy only.
 3. On GitHub, the app's **Webhook URL** = `https://hooks.<domain>/webhooks/source/github/events`.
 Verify: `C init --url … --domain … --ssh … --reserved hooks [--projects-dir <folder>]` → `ok`.
 
 ### H · First deployment
-Hand over to `deploy-app`: suggest the example app of this repo — the user copies it into its own folder
-(`cp -r <repo>/examples/hello-fastapi <projects_dir>/hello-fastapi`, the skill then creates its GitHub repo) —
-or a project of theirs.
+Hand over to `deploy-app`: suggest the example app — the user copies it into its own folder with the commands
+in «Example app» of `reference/server-setup.md` (`deploy-app` then gives the user the command to create its GitHub
+repository) — or a project of theirs.
 After it works: `python3 -I ${CLAUDE_SKILL_DIR}/../deploy-app/scripts/verify.py --server` for the final health
 picture. Offer to decommission the example app afterwards (through `deploy-app`, which confirms first).
 
@@ -134,6 +153,6 @@ Summarize: server (OS, arch, RAM), domain, what is public (80/443) and private (
 | Request | What to do |
 |---|---|
 | `diagnose <user@host>` | Phase B only, read-only, no follow-up questions |
-| `check` | `S health`, `C check`, `S dns <base_domain>`, `S ports <base_domain>` (add `--private <panel port> 6001 6002` if the panel is not on 8000) with the values of `~/.config/coolify-ops/config.json`; one ✔/✘ table |
+| `check` | With the values of `~/.config/coolify-ops/config.json` (`url`, `base_domain`, `ssh`; the panel port is the port in `url`): `S health --url <url> --ssh <ssh>`, `C check`, `S dns <base_domain>`, `S ports <first IP of public_resolver from S dns>` (add `--private <panel port> 6001 6002` if the panel is not on 8000); one ✔/✘ table. **No configuration:** ask for the base domain and `user@host` (and the panel URL if they know it), run the `S` commands with them, and show the API row as «not configured» (offer phase F) — do not run `C check` or `C init` in this read-only mode |
 
 See also `${CLAUDE_SKILL_DIR}/../deploy-app/reference/troubleshooting.md`.

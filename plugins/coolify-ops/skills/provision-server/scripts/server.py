@@ -334,6 +334,10 @@ def cmd_ports(a) -> dict:
             hints.append(f"port {p} (Coolify panel/realtime) is open to the whole Internet: close it in the "
                          "VPS provider's firewall (ufw does not help: Docker bypasses it) or stop forwarding it "
                          "on the router, and reach the panel over the LAN, a VPN or an ssh tunnel")
+        elif r["state"] != "filtered" and getattr(a, "require_filtered", False):
+            ok = False
+            hints.append(f"port {p} reaches the server ({r['state']}): no firewall blocks it, so it will be public as "
+                         "soon as Coolify listens on it. Add the VPS provider's firewall (only 22, 80, 443) first")
     return {"ok": ok, "host": a.host, "ports": result, "hints": hints}
 
 
@@ -411,6 +415,8 @@ def main() -> None:
     s.add_argument("host")
     s.add_argument("--ports", nargs="*", type=int, default=[80, 443])
     s.add_argument("--private", nargs="*", type=int, default=[8000, 6001, 6002])  # panel and realtime
+    s.add_argument("--require-filtered", dest="require_filtered", action="store_true",
+                   help="private ports must be filtered by a firewall, not just closed (VPS before installing)")
     s = sub.add_parser("health")
     s.add_argument("--url")
     s.add_argument("--ssh")

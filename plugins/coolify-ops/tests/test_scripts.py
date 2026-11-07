@@ -15,8 +15,12 @@ sys.path.insert(0, str(SCRIPTS))
 import analyze  # noqa: E402
 import coolify  # noqa: E402
 import prepare  # noqa: E402
+import repo  # noqa: E402
+import verify  # noqa: E402
 
 # ------------------------------------------------------------------ helpers
+
+APP_UUID = "k" * 24  # shaped like a Coolify uuid
 
 
 def make(root: Path, files: dict[str, str]) -> Path:
@@ -25,6 +29,14 @@ def make(root: Path, files: dict[str, str]) -> Path:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
     return root
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Any real HTTP request from a test is a bug: fail at once instead of waiting for DNS or a timeout."""
+    def blocked(*_a, **_k):
+        raise AssertionError("tests must not touch the network: mock coolify.api / coolify._apps")
+    monkeypatch.setattr(coolify.urllib.request, "urlopen", blocked)
 
 
 @pytest.fixture
@@ -65,7 +77,7 @@ def test_env_push_marks_public_and_secret(config, monkeypatch, tmp_path):
     monkeypatch.setattr(coolify, "_set_env",
                         lambda app, k, v, secret: calls.append((k, v, secret)) or {"key": k, "action": "created"})
     f = make(tmp_path, {"vars.env": "# comment\nDATABASE_URL=postgres://a:b@c/d\nexport NEXT_PUBLIC_URL='https://x'\n\n"})
-    r = coolify.cmd_env_push(argparse.Namespace(app="app-uuid", file=str(f / "vars.env")))
+    r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None))
     assert r["ok"]
     assert ("DATABASE_URL", "postgres://a:b@c/d", True) in calls
     assert ("NEXT_PUBLIC_URL", "https://x", False) in calls
@@ -76,15 +88,67 @@ def test_destructive_commands_require_confirmation(config):
     with pytest.raises(coolify.Error):
         coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=False, with_db=False, with_project=False))
     with pytest.raises(coolify.Error):
-        coolify.cmd_rollback(argparse.Namespace(app="x", confirmed=False, image=None))
+        coolify.cmd_rollback(argparse.Namespace(app=APP_UUID, confirmed=False, image="def"))
     with pytest.raises(coolify.Error):
         coolify.cmd_env_delete(argparse.Namespace(app="x", key="A", confirmed=False))
 
 
-def test_registry_resolves_names(config):
+def test_env_push_never_uploads_empty_values(config, monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(coolify, "_set_env",
+                        lambda app, k, v, secret: calls.append(k) or {"key": k, "action": "updated"})
+    f = make(tmp_path, {"vars.env": "DATABASE_URL=\nAPI_KEY=''\nSTRIPE_KEY=sk_test_x\n"})
+    r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None))
+    assert calls == ["STRIPE_KEY"]                       # DATABASE_URL set by create-postgres stays intact
+    assert r["skipped_empty"] == ["DATABASE_URL", "API_KEY"]
+
+
+def test_env_template_creates_private_file_and_keeps_values(config):
+    secrets = config / "secrets" / "shop.env"
+    r = coolify.cmd_env_template(argparse.Namespace(app="shop", keys=["API_KEY", "MAIL_FROM"]))
+    assert r["added"] == ["API_KEY", "MAIL_FROM"] and r["empty"] == ["API_KEY", "MAIL_FROM"]
+    assert secrets.stat().st_mode & 0o777 == 0o600 and secrets.parent.stat().st_mode & 0o777 == 0o700
+    secrets.write_text("API_KEY=filled-in\nMAIL_FROM=\n")
+    r = coolify.cmd_env_template(argparse.Namespace(app="shop", keys=["API_KEY", "SENTRY_DSN"]))
+    assert r["added"] == ["SENTRY_DSN"] and r["already_present"] == ["API_KEY"]
+    assert "API_KEY=filled-in" in secrets.read_text()   # existing values are never touched
+    assert "filled-in" not in json.dumps(r)
+    with pytest.raises(coolify.Error):
+        coolify.cmd_env_template(argparse.Namespace(app="../x", keys=["A"]))
+    with pytest.raises(coolify.Error):
+        coolify.cmd_env_template(argparse.Namespace(app="shop", keys=["BAD-NAME"]))
+
+
+def test_registry_resolves_names(config, monkeypatch):
     coolify.save_to_registry("shop", {"app_uuid": "u-123"})
     assert coolify.resolve_app("shop") == "u-123"
-    assert coolify.resolve_app("other-uuid") == "other-uuid"
+    assert coolify.resolve_app(APP_UUID) == APP_UUID      # uuids pass through without an API call
+
+
+def test_names_missing_from_the_registry_are_looked_up_on_the_server(config, monkeypatch):
+    monkeypatch.setattr(coolify, "_apps", lambda: [{"name": "blog", "uuid": APP_UUID},
+                                                   {"name": "twin", "uuid": "a" * 24}, {"name": "twin", "uuid": "b" * 24}])
+    assert coolify.resolve_app("blog") == APP_UUID
+    with pytest.raises(coolify.Error, match="No app named"):
+        coolify.resolve_app("ghost")
+    with pytest.raises(coolify.Error, match="Several apps"):
+        coolify.resolve_app("twin")
+
+
+def test_rollback_lists_without_confirmation_and_sends_commit(config, monkeypatch):
+    calls = []
+
+    def fake_api(method, path, body=None, query=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return {"current": "abc", "images": [{"tag": "abc", "is_current": True}, {"tag": "def", "is_current": False}]}
+        return {"message": "queued", "deployment_uuid": "dep-1"}
+    monkeypatch.setattr(coolify, "api", fake_api)
+    listed = coolify.cmd_rollback(argparse.Namespace(app=APP_UUID, confirmed=False, image=None))
+    assert listed["current"] == "abc" and len(listed["images"]) == 2
+    done = coolify.cmd_rollback(argparse.Namespace(app=APP_UUID, confirmed=True, image="def"))
+    assert calls[-1] == ("POST", f"/applications/{APP_UUID}/rollback", {"commit": "def"})   # Coolify 4.6 accepts only «commit»
+    assert done["deployment_uuid"] == "dep-1"
 
 
 def test_decommission_waits_before_deleting_the_project(config, monkeypatch):
@@ -211,6 +275,22 @@ def test_existing_dockerfile_keeps_its_port(tmp_path):
     assert s["existing_dockerfile"] and s["port"] == 9000 and s["template"] is None
 
 
+def test_own_dockerfile_makes_an_untemplated_framework_deployable(tmp_path):
+    make(tmp_path, {"requirements.txt": "django\n", "Dockerfile": "FROM x\nEXPOSE 8000\n"})
+    r = analyze.analyze(tmp_path)
+    assert r["deployable"] and "warning_framework" not in r["stack"]
+    assert any("own Dockerfile is used as is" in w for w in r["warnings"])
+    make(tmp_path / "plain", {"requirements.txt": "django\n"})
+    assert not analyze.analyze(tmp_path / "plain")["deployable"]     # without a Dockerfile it still stops
+
+
+def test_databases_other_than_postgres_block(tmp_path):
+    make(tmp_path, {"package.json": json.dumps({"dependencies": {"express": "4", "mongoose": "8", "pg": "8"}})})
+    r = analyze.analyze(tmp_path)
+    assert set(r["databases"]) == {"postgresql", "mongodb"}
+    assert not r["deployable"] and any("mongodb" in b and "only PostgreSQL" in b for b in r["blockers"])
+
+
 # ------------------------------------------------------------------ prepare.py
 
 
@@ -288,3 +368,130 @@ def test_remove_app_images_rejects_unsafe_uuids(monkeypatch):
     monkeypatch.setattr(coolify.subprocess, "run", lambda *a, **k: pytest.fail("ssh must not run"))
     for bad in ("x; rm -rf /", "UPPER", "a1", "$(id)", "abc def ghi jkl mno"):
         assert coolify._remove_app_images("user@server", bad) is None
+
+
+# ------------------------------------------------------------------ coolify.py (0.2.1)
+
+
+def test_env_push_only_uploads_the_named_keys(config, monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(coolify, "_set_env", lambda app, k, v, secret: calls.append(k) or {"key": k, "action": "created"})
+    f = make(tmp_path, {"vars.env": "OLD_KEY=value-changed-in-the-panel-since\nSENTRY_DSN=https://k@sentry.example.org/1\n"})
+    coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=["SENTRY_DSN"]))
+    assert calls == ["SENTRY_DSN"]
+    with pytest.raises(coolify.Error, match="Not in"):
+        coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=["MISSING"]))
+
+
+def test_protect_stores_the_password_locally_and_never_prints_it(config, monkeypatch):
+    sent = []
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None: sent.append(body) or {})
+    coolify.save_to_registry("shop", {"app_uuid": APP_UUID})
+    r = coolify.cmd_protect(argparse.Namespace(app="shop", user="admin", off=False))
+    password = sent[0]["http_basic_auth_password"]
+    assert sent[0]["is_http_basic_auth_enabled"] is True and len(password) <= 72      # Coolify's limit
+    assert password not in json.dumps(r)
+    creds = config / "secrets" / "shop.access"
+    assert password in creds.read_text() and creds.stat().st_mode & 0o777 == 0o600
+    coolify.cmd_protect(argparse.Namespace(app="shop", user="admin", off=True))
+    assert sent[-1] == {"is_http_basic_auth_enabled": False}
+
+
+def test_decommission_refuses_before_deleting_when_db_is_unknown(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None: calls.append((method, path)) or {})
+    with pytest.raises(coolify.Error, match="nothing was deleted"):
+        coolify.cmd_decommission(argparse.Namespace(app=APP_UUID, confirmed=True, with_db=True, with_project=False))
+    assert not [c for c in calls if c[0] == "DELETE"]
+
+
+def test_decommission_finds_the_registry_entry_by_uuid(config, monkeypatch):
+    coolify.save_to_registry("shop", {"app_uuid": APP_UUID, "db_uuid": "d" * 24, "project_uuid": "p" * 24})
+    deleted = []
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None:
+                        deleted.append(path) if method == "DELETE" else {})
+    monkeypatch.setattr(coolify, "_wait_until_gone", lambda path: True)
+    monkeypatch.setattr(coolify, "_wait_for_cleanup", lambda uuids: (True, "watched"))
+    coolify.cmd_decommission(argparse.Namespace(app=APP_UUID, confirmed=True, with_db=True, with_project=True))
+    assert deleted == [f"/applications/{APP_UUID}", f"/databases/{'d' * 24}", f"/projects/{'p' * 24}"]
+    assert "shop" not in coolify.registry()
+
+
+def test_decommission_removes_the_apps_local_secrets(config, monkeypatch):
+    coolify.save_to_registry("shop", {"app_uuid": APP_UUID})
+    secrets = config / "secrets"
+    secrets.mkdir()
+    for name in ("shop.env", "shop.access", "blog.env"):
+        (secrets / name).write_text("X=1\n")
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None: {})
+    monkeypatch.setattr(coolify, "_wait_until_gone", lambda path: True)
+    monkeypatch.setattr(coolify, "_wait_for_cleanup", lambda uuids: (True, "watched"))
+    r = coolify.cmd_decommission(argparse.Namespace(app="shop", confirmed=True, with_db=False, with_project=False))
+    assert sorted(Path(f).name for f in r["deleted"]["local_files"]) == ["shop.access", "shop.env"]
+    assert [f.name for f in secrets.iterdir()] == ["blog.env"]                     # other apps untouched
+
+
+# ------------------------------------------------------------------ repo.py (local git only, no network)
+
+
+@pytest.fixture
+def git_identity(monkeypatch):
+    for var, value in {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.org",
+                       "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.org",
+                       "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}.items():
+        monkeypatch.setenv(var, value)
+
+
+def test_repo_init_commit_and_state_of_a_new_project(tmp_path, git_identity):
+    make(tmp_path, {"package.json": "{}", "index.js": "x", "node_modules/a/i.js": "x", ".env": "SENDGRID_KEY=real\n"})
+    ns = argparse.Namespace
+    r = repo.cmd_init(ns(path=str(tmp_path)))
+    assert r["created_gitignore"] and ".env" in (tmp_path / ".gitignore").read_text()
+    assert repo.cmd_state(ns(path=str(tmp_path)))["to_push"] == []
+    r = repo.cmd_commit(ns(path=str(tmp_path), message="initial commit", all=True, files=None))
+    assert r["committed"]
+    tracked = repo.git(tmp_path, "ls-files").splitlines()
+    assert "index.js" in tracked and ".env" not in tracked and not any(t.startswith("node_modules") for t in tracked)
+    state = repo.cmd_state(ns(path=str(tmp_path)))
+    assert state["branch"] == "main" and not state["has_upstream"] and len(state["to_push"]) == 1   # no @{u} needed
+    with pytest.raises(repo.Error):
+        repo.cmd_init(ns(path=str(tmp_path)))                                        # already a repository
+
+
+def test_repo_commit_refuses_secrets(tmp_path, git_identity):
+    make(tmp_path, {"app.py": 'KEY = "sk_live_' + "a" * 24 + '"\n'})
+    repo.cmd_init(argparse.Namespace(path=str(tmp_path)))
+    r = repo.cmd_commit(argparse.Namespace(path=str(tmp_path), message="x", all=True, files=None))
+    assert not r["ok"] and r["secrets"][0]["file"] == "app.py"
+    assert not repo.git(tmp_path, "rev-parse", "--verify", "-q", "HEAD", check=False)  # nothing committed
+
+
+def test_repo_script_has_no_push():
+    sub = next(a for a in repo.parser()._actions if isinstance(a, argparse._SubParsersAction))
+    assert set(sub.choices) == {"state", "init", "commit"}
+    assert '"push"' not in Path(repo.__file__).read_text()                      # never calls git push
+
+
+def test_repo_commit_only_the_given_files(tmp_path, git_identity):
+    make(tmp_path, {"index.js": "x", "Dockerfile": "FROM x\n"})
+    repo.cmd_init(argparse.Namespace(path=str(tmp_path)))
+    r = repo.cmd_commit(argparse.Namespace(path=str(tmp_path), message="build", all=False, files=["Dockerfile"]))
+    assert r["committed"] and repo.git(tmp_path, "ls-files").splitlines() == ["Dockerfile"]
+    with pytest.raises(repo.Error, match="not found"):
+        repo.cmd_commit(argparse.Namespace(path=str(tmp_path), message="x", all=False, files=["nginx.conf"]))
+
+
+def test_repo_state_never_prints_credentials_in_the_remote(tmp_path, git_identity):
+    repo.cmd_init(argparse.Namespace(path=str(tmp_path)))
+    repo.git(tmp_path, "remote", "add", "origin", "https://bob:s3cr3t-token@git.example.org/team/app.git")
+    state = repo.cmd_state(argparse.Namespace(path=str(tmp_path)))
+    assert "s3cr3t" not in json.dumps(state) and state["remote"] == "https://git.example.org/team/app.git"
+    repo.git(tmp_path, "remote", "set-url", "origin", "git@github.com:someone/my.site.git")
+    assert repo.cmd_state(argparse.Namespace(path=str(tmp_path)))["remote"] == "someone/my.site"   # dots allowed
+
+
+def test_verify_accepts_401_only_for_protected_apps():
+    assert verify.answered_ok(200) and verify.answered_ok(302) and not verify.answered_ok(401)
+    assert verify.answered_ok(401, protected=True) and not verify.answered_ok(200, protected=True)  # must be locked
+    assert verify.external_ok({"is1": "401", "pl2": None}, protected=True)
+    assert not verify.external_ok({"is1": "401"})

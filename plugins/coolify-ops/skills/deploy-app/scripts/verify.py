@@ -2,7 +2,7 @@
 """Verify a deployed app: HTTPS certificate, HTTP→HTTPS redirect, routes, reachability from the Internet
 (check-host.net, optional) and server health over SSH (optional, needs «ssh» in the configuration).
 
-Usage:  verify.py <https://host> [--routes / /health] [--external] [--server] [--wait 120]
+Usage:  verify.py <https://host> [--routes / /health] [--external] [--server] [--wait 120] [--protected]
         verify.py --server                 (server health only: temperature, disk, Coolify)
 """
 
@@ -77,13 +77,18 @@ def external(url: str) -> dict:
         return {"error": f"check-host unavailable: {e}"}
 
 
-def external_ok(external: dict) -> bool:
-    """Nodes that gave no answer (None) are ignored; any node that answered must have got a 2xx/3xx.
+def answered_ok(code, protected: bool = False) -> bool:
+    """2xx/3xx; an app protected with basic auth must answer 401 instead (anything else is a failure)."""
+    return str(code) == "401" if protected else str(code).startswith(("2", "3"))
+
+
+def external_ok(external: dict, protected: bool = False) -> bool:
+    """Nodes that gave no answer (None) are ignored; any node that answered must have got a good code.
     If check-host failed altogether, the external check is «unverified», not failed."""
     if "error" in external:
         return True
     codes = [c for c in external.values() if c is not None]
-    return all(str(c).startswith(("2", "3")) for c in codes)
+    return all(answered_ok(c, protected) for c in codes)
 
 
 def server() -> dict:
@@ -116,6 +121,7 @@ def main() -> None:
     p.add_argument("url", nargs="?"); p.add_argument("--routes", nargs="*", default=["/"])
     p.add_argument("--external", action="store_true"); p.add_argument("--server", action="store_true")
     p.add_argument("--wait", type=int, default=120, help="max seconds waiting for the app to answer")
+    p.add_argument("--protected", action="store_true", help="the app has basic auth: routes must answer 401")
     a = p.parse_args()
     res: dict = {}
     if a.url:
@@ -133,8 +139,8 @@ def main() -> None:
         if a.external:
             res["external"] = external(url.rstrip("/") + a.routes[0])
         res["ok"] = (res["certificate"]["valid"] and res["http_to_https"]["ok"]
-                     and all(200 <= c < 400 for c in res["routes"].values())
-                     and (not a.external or external_ok(res["external"])))
+                     and all(answered_ok(c, a.protected) for c in res["routes"].values())
+                     and (not a.external or external_ok(res["external"], a.protected)))
         if a.external and ("error" in res["external"] or not any(res["external"].values())):
             res["external_unverified"] = True
         elif a.external and None in res["external"].values():
