@@ -180,9 +180,10 @@ El plugin habla con Coolify solo por su API, que se sirve en el **mismo puerto q
 1. *Settings → Advanced* (`/settings/advanced`), apartado *API*: activa **API access** y pon en **Allowed IPs**
    la red desde la que llama Claude Code, p. ej. tu red de casa `192.168.1.0/24`, o el rango de tu VPN (VPS, ver
    abajo). Pulsa **Save**.
-2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): crea un token con **`read`, `write`, `deploy` y
-   `delete`**. `delete` es aparte de `write` (sin él, cada borrado da 403), y los permisos no se pueden cambiar
-   después: si te olvidas uno, crea otro token.
+2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): crea un token con **`read`, `read:sensitive`, `write`,
+   `deploy` y `delete`**. `delete` es aparte de `write` (sin él, cada borrado da 403) y `read:sensitive` hace
+   falta para leer los logs de una app; los permisos no se pueden cambiar después: si te olvidas uno, crea otro
+   token.
 3. Copia el token (solo se muestra una vez) y guárdalo **sin pegarlo en el chat ni en el historial del shell**:
    - **macOS** (Llavero), justo después de copiarlo:
      ```bash

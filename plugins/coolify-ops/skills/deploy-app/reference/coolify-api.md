@@ -1,7 +1,8 @@
 # Coolify API used by the skills
 
 Base: `<url>/api/v1` · Auth: `Authorization: Bearer <token>` · Checked against Coolify **v4.6.0**.
-The token needs `read`, `write`, `deploy` and `delete` (`root` and `read:sensitive` are not needed).
+The token needs `read`, `read:sensitive`, `write`, `deploy` and `delete` (`root` is not needed). `read:sensitive`
+is required by `GET /applications/{uuid}/logs` (`routes/api.php`); the scripts never print the values it exposes.
 `delete` is a separate permission: without it every `DELETE` returns 403 «Missing required permissions: delete».
 
 | `coolify.py` command | Method and path |

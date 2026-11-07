@@ -58,7 +58,7 @@ configuración de abajo, o deja que te guíe la skill `provision-server`.
 
 1. **Activa la API** en Coolify: *Settings → Advanced → API access → Enabled*, y pon en *Allowed IPs* tu red
    (p. ej. `192.168.1.0/24`) y pulsa *Save*.
-2. **Crea un token** en *Keys & Tokens → API Tokens* (`/security/api-tokens`) con `read`, `write`, `deploy` y `delete`.
+2. **Crea un token** en *Keys & Tokens → API Tokens* (`/security/api-tokens`) con `read`, `read:sensitive` (para los logs), `write`, `deploy` y `delete`.
 3. **Guarda el token** (nunca va en un repo ni en el chat). Elige una opción:
    - Llavero de macOS (copia antes el token):
      `security add-generic-password -U -a "$USER" -s coolify-api-token -w "$(pbpaste)" && pbcopy < /dev/null`

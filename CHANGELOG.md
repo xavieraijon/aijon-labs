@@ -34,6 +34,8 @@ All notable changes to the plugins of this marketplace. The format is based on
   get `nginx-static.conf`, which now serves the site's own `404.html`.
 - `prepare.py` refuses build folders, fallback files and environment values read from the project's config that
   are not plain paths or names, before writing anything.
+- The API token also needs `read:sensitive`: Coolify 4.6 requires it to read an app's logs (`logs` answered 403).
+  The docs said it was not needed.
 - Angular 21 builds with Node 22 and Angular 22 with Node 24.
 - `deploy-app` no longer assumes it must create the database: if the user brings their own PostgreSQL,
   `DATABASE_URL` is handled like any other variable and the summary says «external».

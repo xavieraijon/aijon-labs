@@ -114,7 +114,8 @@ Re-run `S ports …`: 80/443 should now be `open`, 8000/6001/6002 not.
 Browser steps for the user (step 8 of the guide):
 1. *Settings → Advanced* (`/settings/advanced`): **API access** on, *Allowed IPs* = the network Claude Code
    calls from, **Save**.
-2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): create a token with `read`, `write`, `deploy`, `delete`.
+2. *Keys & Tokens → API Tokens* (`/security/api-tokens`): create a token with `read`, `read:sensitive` (logs), `write`, `deploy`,
+   `delete`.
    **VPS:** the API shares the panel's port, which the firewall closes, so Claude Code needs a private network to
    reach it: follow «Private network for the API (VPS)» in `reference/server-setup.md` (Tailscale; URL
    `http://<server's tailnet address>:8000`, *Allowed IPs* = `100.64.0.0/10`). Do not suggest opening 8000 to the
