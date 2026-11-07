@@ -89,8 +89,8 @@ def server() -> dict:
                "echo D=$(df -P / | awk 'NR==2{print $5}'); "
                "echo C=$(docker inspect -f '{{.State.Health.Status}}' coolify 2>/dev/null)")
     try:
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, command],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "sh -s"],
+                           input=command, capture_output=True, text=True, timeout=30)  # POSIX sh, any login shell
     except subprocess.TimeoutExpired:
         return {"error": "ssh did not answer"}
     if r.returncode != 0:

@@ -16,6 +16,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   (it used to leave volumes, images and folders behind).
 - `status` reads auto-deploy from the app settings; `env-list` hides preview copies; new `env-delete`.
 - The token needs the `delete` permission as well.
+- New skill `provision-server`: guides the setup of a Coolify server (diagnosis over ssh, wildcard DNS, ports from
+  the Internet, hardening, install, API, GitHub App), checking every step; never runs `sudo` or handles passwords.
+  New script `server.py` (`diagnose`, `dns`, `ports`, `health`).
+- Tutorial «Coolify from scratch» in English and Spanish (`docs/en`, `docs/es`).
+- Remote ssh commands run through `sh -s`, so they work whatever the login shell of the server user (zsh, fish…).
 
 ## coolify-deploy (old name)
 

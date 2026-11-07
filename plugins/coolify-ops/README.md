@@ -8,9 +8,12 @@ push. Everything goes through the Coolify API: no browser automation.
 | Skill | Invoke | What it does |
 |---|---|---|
 | `deploy-app` | `/coolify-ops:deploy-app` | Deploy and manage apps (status, logs, update, env vars, rollback, decommission) |
-| `provision-server` | `/coolify-ops:provision-server` | Install Coolify on a VPS or home server and connect it *(coming in 0.3)* |
+| `provision-server` | `/coolify-ops:provision-server` | Set up Coolify on a VPS or home server step by step, checking each step (never handles passwords or `sudo`) |
 
 ```
+> set up Coolify on my VPS user@203.0.113.10 with the domain example.org
+> /coolify-ops:provision-server diagnose user@my-server
+> /coolify-ops:provision-server check
 > deploy ~/Projects/my-shop
 > /coolify-ops:deploy-app status
 > /coolify-ops:deploy-app logs my-shop
@@ -101,6 +104,15 @@ All print JSON and can be used by hand. They live in `skills/deploy-app/scripts/
 | `prepare.py <path>` | Writes Dockerfile, `.dockerignore` and `nginx.conf` from the templates |
 | `local_check.py <path> --port N` | Local Docker build and run; always cleans up |
 | `verify.py https://host` | Certificate, redirect, routes, `--external` (check-host.net) and `--server` (ssh) |
+
+And in `skills/provision-server/scripts/`:
+
+| Script | Use |
+|---|---|
+| `server.py diagnose user@host` | Read-only server diagnosis: OS, arch, RAM, disk, Docker, Coolify, ports in use, hardening |
+| `server.py dns example.org` | Wildcard DNS check on a public resolver |
+| `server.py ports example.org --private 8000` | Reachability of 80/443 from the Internet, panel port closed |
+| `server.py health` | Coolify `/api/health` and its containers |
 
 See also [troubleshooting](skills/deploy-app/reference/troubleshooting.md) and the
 [API reference](skills/deploy-app/reference/coolify-api.md).
