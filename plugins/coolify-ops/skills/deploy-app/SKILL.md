@@ -131,7 +131,7 @@ Summarize in a few lines: URL, what was created (project, app, database), verifi
 | `update <app>` | Local commit if there are changes → push by the user → `C last-deployment <app>` until the new commit shows up → `C wait …` → `V …`. Without auto-deploy: `C deploy <app>` |
 | `env <app>` | `C env-list <app>` (names only). To change values: the user edits `secrets/<app>.env` → `C env-push …` → `C deploy <app>`. To delete one: confirm with the user → `C env-delete <app> <KEY> --confirmed` |
 | `rollback <app>` | `C rollback <app> --confirmed` lists images; **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` |
-| `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. The script waits for Coolify to finish deleting before removing the project |
+| `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. The script watches the server until Coolify's cleanup is done before removing the project; if `deleted.warning` appears, the project was kept: tell the user |
 
 ---
 

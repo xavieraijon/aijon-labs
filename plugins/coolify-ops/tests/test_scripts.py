@@ -232,3 +232,50 @@ def test_bundled_example_is_deployable():
     assert r["deployable"], r["blockers"]
     assert (r["stack"]["template"], r["stack"]["module"], r["stack"]["port"]) == ("python-fastapi", "main:app", 8000)
     assert not (example / "Dockerfile").exists()  # the skill must write it
+
+
+def test_external_check_ignores_silent_nodes():
+    import verify
+    assert verify.external_ok({"in1": "200", "ir4": None, "rs1": "200"})   # a node that did not answer
+    assert not verify.external_ok({"in1": "200", "de1": "502"})            # a node that saw an error
+    assert verify.external_ok({"error": "check-host unavailable"})        # unverified, not failed
+
+
+def _fake_delete_api(calls):
+    """API that answers 404 right after DELETE, like Coolify does before its background cleanup runs."""
+    def fake(method, path, body=None, query=None):
+        calls.append((method, path))
+        if method == "GET":
+            raise coolify.Error("HTTP 404 on GET")
+        return {}
+    return fake
+
+
+def test_decommission_waits_for_server_cleanup_not_for_404(config, monkeypatch):
+    """Regression: the API says 404 immediately; the project may only go once the server has no leftovers."""
+    coolify.write_json(coolify.CONFIG, {**coolify.read_json(coolify.CONFIG, {}), "ssh": "user@server"})
+    coolify.save_to_registry("x", {"app_uuid": "a1", "db_uuid": "d1", "project_uuid": "p1"})
+    calls, checks = [], iter([["container a1-123", "volume postgres-data-d1"], ["volume postgres-data-d1"], []])
+    events = []
+    monkeypatch.setattr(coolify, "api", _fake_delete_api(calls))
+    monkeypatch.setattr(coolify, "_remote_leftovers", lambda target, uuids: events.append("check") or next(checks))
+    monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
+    real_api = coolify.api
+    monkeypatch.setattr(coolify, "api", lambda *a, **k: (events.append(a[:2]), real_api(*a, **k))[1])
+    r = coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=True, with_db=True, with_project=True))
+    assert r["deleted"]["project"] == "p1" and "observed over ssh" in r["deleted"]["cleanup"]
+    assert events.index(("DELETE", "/projects/p1")) > max(i for i, e in enumerate(events) if e == "check")
+
+
+def test_decommission_keeps_project_if_cleanup_never_finishes(config, monkeypatch):
+    coolify.write_json(coolify.CONFIG, {**coolify.read_json(coolify.CONFIG, {}), "ssh": "user@server"})
+    coolify.save_to_registry("x", {"app_uuid": "a1", "project_uuid": "p1"})
+    calls = []
+    monkeypatch.setattr(coolify, "api", _fake_delete_api(calls))
+    monkeypatch.setattr(coolify, "_remote_leftovers", lambda target, uuids: ["volume a1-data"])
+    clock = iter(range(0, 10_000, 60))
+    monkeypatch.setattr(coolify.time, "time", lambda: next(clock))
+    monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
+    r = coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=True, with_db=False, with_project=True))
+    assert "project" not in r["deleted"] and "warning" in r["deleted"]
+    assert ("DELETE", "/projects/p1") not in calls

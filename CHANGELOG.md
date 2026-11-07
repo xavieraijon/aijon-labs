@@ -12,8 +12,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   `decommission`.
 - Token can also come from `~/.config/coolify-ops/token` (Linux and other systems without a Keychain).
 - The v0.1 configuration (`~/.config/coolify-deploy`, Spanish keys) is migrated automatically.
-- `decommission` waits for Coolify to finish deleting the app and database before deleting the project
-  (it used to leave volumes, images and folders behind).
+- `decommission` waits until Coolify's background cleanup has really finished on the server (watched over ssh;
+  the API answers 404 before it runs) and only then deletes the project. It used to leave volumes, images and
+  folders behind.
 - `status` reads auto-deploy from the app settings; `env-list` hides preview copies; new `env-delete`.
 - The token needs the `delete` permission as well.
 - New skill `provision-server`: guides the setup of a Coolify server (diagnosis over ssh, wildcard DNS, ports from

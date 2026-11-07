@@ -77,6 +77,15 @@ def external(url: str) -> dict:
         return {"error": f"check-host unavailable: {e}"}
 
 
+def external_ok(external: dict) -> bool:
+    """Nodes that gave no answer (None) are ignored; any node that answered must have got a 2xx/3xx.
+    If check-host failed altogether, the external check is «unverified», not failed."""
+    if "error" in external:
+        return True
+    codes = [c for c in external.values() if c is not None]
+    return all(str(c).startswith(("2", "3")) for c in codes)
+
+
 def server() -> dict:
     try:
         target = config().get("ssh")
@@ -125,10 +134,11 @@ def main() -> None:
             res["external"] = external(url.rstrip("/") + a.routes[0])
         res["ok"] = (res["certificate"]["valid"] and res["http_to_https"]["ok"]
                      and all(200 <= c < 400 for c in res["routes"].values())
-                     and (not a.external or "error" in res["external"]
-                          or all(str(c).startswith(("2", "3")) for c in res["external"].values())))
-        if a.external and "error" in res["external"]:
+                     and (not a.external or external_ok(res["external"])))
+        if a.external and ("error" in res["external"] or not any(res["external"].values())):
             res["external_unverified"] = True
+        elif a.external and None in res["external"].values():
+            res["external_partial"] = True  # some check-host nodes gave no answer: not a failure of the app
     if a.server:
         res["server"] = server()
         res["ok"] = res.get("ok", True) and res["server"].get("ok", "skipped" in res["server"])

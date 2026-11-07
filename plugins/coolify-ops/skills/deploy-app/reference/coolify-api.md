@@ -20,7 +20,7 @@ The token needs `read`, `write`, `deploy` and `delete` (`root` and `read:sensiti
 | `last-deployment` | `GET /deployments/applications/{uuid}?take=1` |
 | `logs` | `GET /applications/{uuid}/logs?lines=…` |
 | `rollback` | `GET /applications/{uuid}/rollback-images`, `POST /applications/{uuid}/rollback` |
-| `decommission` | `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, polling `GET` until 404, then `DELETE /projects/{uuid}` |
+| `decommission` | `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, `GET` until 404, server watched over ssh until the cleanup job is done, then `DELETE /projects/{uuid}` |
 
 Notes:
 - A database's internal URL is `postgres://user:password@<database-uuid>:5432/<db>`: the host is the uuid and only
@@ -29,4 +29,5 @@ Notes:
 - Every variable gets a twin with `is_preview=true` for preview deployments; `env-list` hides them and
   `env-delete` removes both.
 - The applications list has no `settings`; auto-deploy (`settings.is_auto_deploy_enabled`) needs the detail call.
-- Deletions run in the background (a queued job). Deleting the parent project too early breaks the cleanup.
+- Deletions run in the background (`DeleteResourceJob`). The API answers 404 *before* that job runs, so a 404 does
+  not mean the server is clean. Deleting the parent project too early breaks the job (verified on v4.6.0).

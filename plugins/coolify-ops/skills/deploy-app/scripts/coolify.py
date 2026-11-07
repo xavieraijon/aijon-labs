@@ -465,8 +465,13 @@ def cmd_rollback(a):
     return {"ok": True, **api("POST", f"/applications/{app}/rollback", {"docker_tag": a.image})}
 
 
+GRACE_WITHOUT_SSH = 45  # seconds to let Coolify's background cleanup run when it cannot be observed
+SETTLE_SECONDS = 5  # after containers and volumes are gone, Coolify still removes networks/folders
+
+
 def _wait_until_gone(path: str, timeout: int = 180) -> bool:
-    """Coolify deletes in the background: wait until the resource returns 404 (server cleanup finished)."""
+    """Wait until the API returns 404. Coolify answers 404 as soon as the record is marked deleted, BEFORE its
+    background job cleans up the server, so this alone does not mean the cleanup has finished."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -477,6 +482,40 @@ def _wait_until_gone(path: str, timeout: int = 180) -> bool:
             raise
         time.sleep(3)
     return False
+
+
+def _remote_leftovers(target: str, uuids: list[str]) -> list[str] | None:
+    """Containers and volumes on the server whose name contains one of the uuids (None if ssh fails)."""
+    pattern = "|".join(re.escape(u) for u in uuids)
+    script = "docker ps -a --format 'container {{.Names}}'; docker volume ls --format 'volume {{.Name}}'"
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "sh -s"],
+                           input=script, capture_output=True, text=True, timeout=40)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if r.returncode != 0:
+        return None
+    return [line for line in r.stdout.splitlines() if re.search(pattern, line)]
+
+
+def _wait_for_cleanup(uuids: list[str], timeout: int = 180) -> tuple[bool, str]:
+    """Wait for Coolify's background cleanup of these resources. Returns (finished, how it was checked)."""
+    target = (read_json(CONFIG, {}) or {}).get("ssh")
+    if not target:
+        time.sleep(GRACE_WITHOUT_SSH)
+        return True, f"not observed (no ssh in the configuration): waited {GRACE_WITHOUT_SSH} s"
+    deadline = time.time() + timeout
+    left = None
+    while time.time() < deadline:
+        left = _remote_leftovers(target, uuids)
+        if left is None:
+            time.sleep(GRACE_WITHOUT_SSH)
+            return True, f"not observed (ssh failed): waited {GRACE_WITHOUT_SSH} s"
+        if not left:
+            time.sleep(SETTLE_SECONDS)
+            return True, "observed over ssh: no containers or volumes left"
+        time.sleep(5)
+    return False, "still on the server after {} s: {}".format(timeout, ", ".join(left or []))
 
 
 def cmd_decommission(a):
@@ -493,12 +532,15 @@ def cmd_decommission(a):
         api("DELETE", f"/databases/{reg[name]['db_uuid']}", query={"delete_volumes": "true"})
         deleted["db"] = reg[name]["db_uuid"]
         pending.append(f"/databases/{reg[name]['db_uuid']}")
-    # Deleting the project before Coolify finishes makes its cleanup fail and leaves volumes,
-    # images and folders orphaned on the server. So wait until every resource is gone first.
+    # Deleting the project before Coolify's background job finishes makes that job fail («project on null»)
+    # and leaves volumes, images and folders orphaned. The API answers 404 before the job runs, so the
+    # cleanup itself is watched on the server.
     unfinished = [p for p in pending if not _wait_until_gone(p)]
-    if unfinished:
-        deleted["warning"] = ("Coolify did not finish deleting in time: " + ", ".join(unfinished)
-                              + " (project kept; run again later)")
+    finished, how = (False, "") if unfinished else _wait_for_cleanup([u for u in (app, deleted.get("db")) if u])
+    deleted["cleanup"] = how
+    if unfinished or not finished:
+        deleted["warning"] = ("Coolify did not finish deleting in time: " + (", ".join(unfinished) or how)
+                              + " (project kept; run decommission again later or delete it in Coolify)")
     elif a.with_project and reg.get(name, {}).get("project_uuid"):
         try:
             api("DELETE", f"/projects/{reg[name]['project_uuid']}")
