@@ -277,10 +277,21 @@ def test_react_router_default_is_server(tmp_path):
 def test_react_router_warns_without_allowed_action_origins(tmp_path):
     deps, dev = {"@react-router/serve": "^8"}, {"@react-router/dev": "^8"}
     s = stack(tmp_path, deps, dev=dev)
-    assert s["action_origins_missing"] and "allowedActionOrigins" in s["warning_action_origins"]
+    assert s["origin_fix"] == {"file": "react-router.config.ts", "add": 'allowedActionOrigins: ["{domain}"]'}
+    assert "400" in s["warning_origin"]
     cfg = "export default { allowedActionOrigins: ['shop.example.org'] } satisfies Config;"
     s = stack(tmp_path, deps, {"react-router.config.ts": cfg}, dev=dev)
-    assert "action_origins_missing" not in s and "warning_action_origins" not in s
+    assert "origin_fix" not in s and "warning_origin" not in s
+
+
+@pytest.mark.parametrize("security,fix", [("", True), ("security: { allowedDomains: [{ hostname: 'x' }] },", False),
+                                          ("security: { checkOrigin: false },", False)])
+def test_astro_server_origin_fix(tmp_path, security, fix):
+    cfg = f"export default defineConfig({{ {security} adapter: node({{ mode: 'standalone' }}) }})"
+    s = stack(tmp_path, {"astro": "^7", "@astrojs/node": "^11"}, {"astro.config.mjs": cfg})
+    assert ("origin_fix" in s) is fix
+    if fix:
+        assert s["origin_fix"]["file"] == "astro.config.mjs" and "allowedDomains" in s["origin_fix"]["add"]
 
 
 def test_react_router_spa_mode(tmp_path):
@@ -425,6 +436,16 @@ def test_unsafe_config_value_stops_prepare(tmp_path, monkeypatch, capsys):
     assert e.value.code == 1
     assert "BUILD_DIR" in json.loads(capsys.readouterr().out)["error"]
     assert not (tmp_path / "Dockerfile").exists()
+
+
+def test_overwrite_regenerates_an_existing_dockerfile(tmp_path, monkeypatch, capsys):
+    project(tmp_path, {"astro": "^7"}, {"Dockerfile": "FROM old\n", "nginx.conf": "old"})
+    for argv, created in ((["prepare.py", str(tmp_path)], []),
+                          (["prepare.py", str(tmp_path), "--overwrite"], ["Dockerfile", ".dockerignore", "nginx.conf"])):
+        monkeypatch.setattr(sys, "argv", argv)
+        prepare.main()
+        assert json.loads(capsys.readouterr().out)["created"] == created
+    assert "absolute_redirect off" in (tmp_path / "nginx.conf").read_text()
 
 
 def test_build_folders_are_ignored():

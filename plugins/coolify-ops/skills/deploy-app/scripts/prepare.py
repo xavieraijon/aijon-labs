@@ -85,7 +85,7 @@ def main() -> None:
         print(json.dumps(analysis, ensure_ascii=False))
         sys.exit(1)
     stack = analysis.get("stack", {})
-    template = a.template or stack.get("template")
+    template = a.template or stack.get("template") or (stack.get("suggested_template") if a.overwrite else None)
     if not template:
         reason = "it already has a Dockerfile" if stack.get("existing_dockerfile") else "no template for this project"
         print(json.dumps({"ok": True, "created": [], "skipped": [], "reason": reason}, ensure_ascii=False))

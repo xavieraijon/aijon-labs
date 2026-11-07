@@ -15,8 +15,10 @@ All notable changes to the plugins of this marketplace. The format is based on
   site.
 - Projects that cannot run on a plain server (SvelteKit `adapter-auto`, Astro or Nitro adapters for other
   platforms, Nuxt 2, Angular Universal) are blocked with the exact change that would make them deployable.
-- React Router: the analysis warns when `allowedActionOrigins` is missing (form actions answer 400 behind HTTPS
-  with `react-router-serve`) and the skill shows the line to add.
+- React Router and Astro (server): the analysis warns when the project does not trust its own domain
+  (`allowedActionOrigins`, `security.allowedDomains`). Behind HTTPS their origin checks see `http://` and reject
+  every form submission (400/403); the skill shows the line to add (`stack.origin_fix`) and adds it only if the
+  user asks.
 - `create-app --env-domain KEY` and `env-domain <app> KEY…` set a variable to the app's own domain (used for
   Angular's `NG_ALLOWED_HOSTS`). If the variable fails, `create-app` still returns the app's uuid.
 - `env-push --buildtime KEY…` and `create-postgres --buildtime` make secret variables available at build time
@@ -42,6 +44,9 @@ All notable changes to the plugins of this marketplace. The format is based on
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- `prepare.py --overwrite` regenerates a Dockerfile it wrote before (it used to skip any project that already had
+  one, so the documented way to change e.g. the Node version did nothing).
+- nginx redirects (e.g. `/about` → `/about/`) are relative, so they keep HTTPS and the host behind the proxy.
 - React Router, Remix with Vite, SolidStart, Qwik City, Vike and TanStack Start projects were treated as a Vite
   single-page app served from `dist/`, which deployed a broken site without any warning; Analog was treated as a
   plain Angular app. Classic Remix keeps working with the `node-server` template.

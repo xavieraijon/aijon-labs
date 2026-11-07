@@ -299,7 +299,14 @@ def analyze_astro(root: Path, r: dict, deps: dict) -> dict:
     if "@astrojs/node" in deps:
         _, mode = literal(text, "mode")
         if mode == "standalone":
-            return ssr_server(r, "astro", "npm run build", "dist", ["node", "dist/server/entry.mjs"], 4321)
+            ssr_server(r, "astro", "npm run build", "dist", ["node", "dist/server/entry.mjs"], 4321)
+            # Astro trusts X-Forwarded-Proto only for hosts in security.allowedDomains; otherwise checkOrigin
+            # sees http:// and rejects every form POST (403)
+            if not re.search(r"\ballowedDomains\s*:|\bcheckOrigin\s*:\s*false\b", text):
+                cfg = next((f.name for f in sorted(root.glob("astro.config.*"))), "astro.config.mjs")
+                origin_fix(r, "Astro", cfg, 'security: { allowedDomains: [{ hostname: "{domain}", protocol: "https" }] }',
+                           403)
+            return r
         return blocked(r, "astro", "Astro's @astrojs/node adapter must use mode: 'standalone' to run on its own "
                                    f"(found: {mode or 'not set'}), or add your own Dockerfile")
     if literal(text, "output")[1] == "server":
@@ -359,10 +366,15 @@ def analyze_react_router(root: Path, r: dict, pkg: dict) -> dict:
     ssr_server(r, "react-router", "npm run build", build_dir, serve, 3000)
     if not re.search(r"\ballowedActionOrigins\s*:", text):
         # react-router-serve does not trust the proxy: behind HTTPS it sees http://, so the Origin check fails
-        r["action_origins_missing"] = True
-        r["warning_action_origins"] = ("React Router rejects form actions (400) behind an HTTPS proxy unless "
-                                       "react-router.config.ts sets allowedActionOrigins with the app's domain")
+        origin_fix(r, "React Router", "react-router.config.ts", 'allowedActionOrigins: ["{domain}"]', 400)
     return r
+
+
+def origin_fix(r: dict, name: str, file: str, line: str, status: int) -> None:
+    """Form posts fail behind the HTTPS proxy until the project trusts its own domain (a code change: offer it)."""
+    r["origin_fix"] = {"file": file, "add": line}
+    r["warning_origin"] = (f"{name} rejects form submissions ({status}) behind an HTTPS proxy until {file} trusts the "
+                           f"app's domain: add {line}")
 
 
 def analyze_angular(root: Path, r: dict, deps: dict) -> dict:
@@ -536,6 +548,8 @@ def analyze(root: Path) -> dict:
     if dockerfile.exists():
         expose = re.findall(r"^\s*EXPOSE\s+(\d+)", read(dockerfile), re.M | re.I)
         stack["existing_dockerfile"] = True
+        if stack.get("template"):  # what prepare.py --overwrite regenerates (e.g. a Dockerfile it wrote before)
+            stack["suggested_template"] = stack["template"]
         stack["template"] = None
         if stack.pop("warning_framework", None):  # the project's own Dockerfile is used as is
             warnings.append(f"{stack.get('framework') or 'this stack'} has no template: the project's own Dockerfile "
