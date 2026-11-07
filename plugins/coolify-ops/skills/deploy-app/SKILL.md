@@ -94,7 +94,10 @@ plugin.
   `has_login_estimate`, `paid_services_estimate`, `git`, `suggested_name`, and when present `build_time_env`.
   For the frameworks that can be static or a server, `stack.render` says which (`static` → nginx, `server` →
   Node); `stack.runtime_env` lists variables set from the domain at creation (e.g. `NG_ALLOWED_HOSTS`) and
-  `stack.ssr_marker` a text that proves server rendering.
+  `stack.ssr_marker` a text that proves server rendering. `stack.action_origins_missing` (React Router): its form
+  actions will answer 400 behind HTTPS; in the summary (step D) show the fix — in `react-router.config.ts`,
+  `allowedActionOrigins: ["<name>.<base_domain>"]` — and add it only if the user asks (rule 6; then commit it
+  with the deployment files). Pages without forms work either way.
 - From here on, `<name>` = the name the user gave, else `suggested_name`; `<port>` = `stack.port`;
   `<path>` = the project folder.
 - No GitHub remote yet: the owner is `gh api user -q .login` unless the user names an organisation; the repository

@@ -15,6 +15,8 @@ All notable changes to the plugins of this marketplace. The format is based on
   site.
 - Projects that cannot run on a plain server (SvelteKit `adapter-auto`, Astro or Nitro adapters for other
   platforms, Nuxt 2, Angular Universal) are blocked with the exact change that would make them deployable.
+- React Router: the analysis warns when `allowedActionOrigins` is missing (form actions answer 400 behind HTTPS
+  with `react-router-serve`) and the skill shows the line to add.
 - `create-app --env-domain KEY` and `env-domain <app> KEY…` set a variable to the app's own domain (used for
   Angular's `NG_ALLOWED_HOSTS`). If the variable fails, `create-app` still returns the app's uuid.
 - `env-push --buildtime KEY…` and `create-postgres --buildtime` make secret variables available at build time

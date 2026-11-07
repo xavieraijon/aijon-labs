@@ -309,11 +309,15 @@ def analyze_astro(root: Path, r: dict, deps: dict) -> dict:
 
 
 def analyze_sveltekit(root: Path, r: dict) -> dict:
+    # SvelteKit ≤ 2: svelte.config.*; SvelteKit 3: options of the sveltekit() plugin in vite.config.*
+    adapter_import = r"""from\s+['"]@sveltejs/adapter-([\w-]+)['"]"""
     text = config_text(root, "svelte.config") or ""
-    m = re.search(r"""from\s+['"]@sveltejs/adapter-([\w-]+)['"]""", text)
+    if not re.search(adapter_import, text):
+        text = config_text(root, "vite.config") or text
+    m = re.search(adapter_import, text)
     adapter = m.group(1) if m else "auto"
     hint = ("install @sveltejs/adapter-node (server) or @sveltejs/adapter-static (static site) and use it in "
-            "svelte.config.js")
+            "svelte.config.js (SvelteKit 3: in the sveltekit() options of vite.config.ts)")
     if adapter == "node":
         has_out, out = literal(text, "out")
         has_prefix, prefix = literal(text, "envPrefix")
@@ -352,7 +356,13 @@ def analyze_react_router(root: Path, r: dict, pkg: dict) -> dict:
         fallback = "__spa-fallback.html" if re.search(r"\bprerender\s*:", text) else "index.html"
         return static_site(r, "react-router", "npm run build", f"{build_dir}/client", spa=True, fallback=fallback)
     serve = ["./node_modules/.bin/react-router-serve", f"{build_dir}/server/{server_file or 'index.js'}"]
-    return ssr_server(r, "react-router", "npm run build", build_dir, serve, 3000)
+    ssr_server(r, "react-router", "npm run build", build_dir, serve, 3000)
+    if not re.search(r"\ballowedActionOrigins\s*:", text):
+        # react-router-serve does not trust the proxy: behind HTTPS it sees http://, so the Origin check fails
+        r["action_origins_missing"] = True
+        r["warning_action_origins"] = ("React Router rejects form actions (400) behind an HTTPS proxy unless "
+                                       "react-router.config.ts sets allowedActionOrigins with the app's domain")
+    return r
 
 
 def analyze_angular(root: Path, r: dict, deps: dict) -> dict:

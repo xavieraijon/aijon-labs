@@ -174,6 +174,13 @@ def test_sveltekit_adapter_node_default_out(tmp_path):
     assert s["extra_env"] == {"PROTOCOL_HEADER": "x-forwarded-proto", "HOST_HEADER": "x-forwarded-host"}
 
 
+def test_sveltekit_3_adapter_in_vite_config(tmp_path):
+    cfg = ("import adapter from '@sveltejs/adapter-node';\nimport { sveltekit } from '@sveltejs/kit/vite';\n"
+           "export default defineConfig({ plugins: [sveltekit({ adapter: adapter({ out: 'srv' }) })] });")
+    s = stack(tmp_path, {}, {"vite.config.ts": cfg}, dev={"@sveltejs/kit": "^3", "vite": "^8"})
+    assert (s["template"], s["start_cmd"]) == ("node-ssr", ["node", "srv/index.js"])
+
+
 def test_sveltekit_adapter_node_custom_out(tmp_path):
     s = stack(tmp_path, {}, {"svelte.config.js": SK_NODE % "{ out: 'server-out' }"}, dev={"@sveltejs/kit": "^3"})
     assert (s["build_dir"], s["start_cmd"]) == ("server-out", ["node", "server-out/index.js"])
@@ -265,6 +272,15 @@ def test_react_router_default_is_server(tmp_path):
     s = stack(tmp_path, {"@react-router/serve": "^8", "react-router": "^8"}, dev={"@react-router/dev": "^8", "vite": "^7"})
     assert (s["template"], s["build_dir"], s["port"]) == ("node-ssr", "build", 3000)
     assert s["start_cmd"] == ["./node_modules/.bin/react-router-serve", "build/server/index.js"]
+
+
+def test_react_router_warns_without_allowed_action_origins(tmp_path):
+    deps, dev = {"@react-router/serve": "^8"}, {"@react-router/dev": "^8"}
+    s = stack(tmp_path, deps, dev=dev)
+    assert s["action_origins_missing"] and "allowedActionOrigins" in s["warning_action_origins"]
+    cfg = "export default { allowedActionOrigins: ['shop.example.org'] } satisfies Config;"
+    s = stack(tmp_path, deps, {"react-router.config.ts": cfg}, dev=dev)
+    assert "action_origins_missing" not in s and "warning_action_origins" not in s
 
 
 def test_react_router_spa_mode(tmp_path):
