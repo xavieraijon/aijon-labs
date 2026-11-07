@@ -317,14 +317,17 @@ def cmd_create_postgres(a):
     uuid = r["uuid"]
     internal_url = f"postgres://{user}:{password}@{uuid}:5432/{user}"
     save_to_registry(a.app or a.name, {"db_uuid": uuid, "project_uuid": a.project})
-    if a.app_uuid:  # connect it to the app as DATABASE_URL (secret, runtime only)
-        _set_env(a.app_uuid, "DATABASE_URL", internal_url, secret=True)
+    if a.app_uuid:  # connect it to the app as DATABASE_URL (secret; build time too only if the build inlines it)
+        _set_env(a.app_uuid, "DATABASE_URL", internal_url, secret=True, buildtime=getattr(a, "buildtime", False))
     return {"ok": True, "db_uuid": uuid, "internal_host": uuid, "user": user,
             "database_url": mask(internal_url), "linked_to_app": bool(a.app_uuid)}
 
 
 def cmd_create_app(a):
     cfg = config()
+    bad = [k for k in getattr(a, "env_domain", None) or [] if not ENV_KEY.fullmatch(k)]
+    if bad:
+        raise Error(f"Invalid variable names: {', '.join(bad)}")
     check = cmd_domain_check(argparse.Namespace(host=a.domain))
     if not check["available"]:
         raise Error(f"Domain {check['host']} not available: {', '.join(check['reasons'])}")
@@ -345,13 +348,43 @@ def cmd_create_app(a):
     uuid = r["uuid"]
     save_to_registry(a.name, {"app_uuid": uuid, "project_uuid": a.project, "domain": check["host"],
                               "repo": a.repo, "branch": a.branch})
-    return {"ok": True, "app_uuid": uuid, "url": f"https://{check['host']}"}
+    res = {"ok": True, "app_uuid": uuid, "url": f"https://{check['host']}"}
+    if getattr(a, "env_domain", None):  # the app exists now: report env failures instead of raising, so the uuid is never lost
+        res["env_domain"], res["env_errors"] = _set_domain_envs(uuid, check["host"], a.env_domain)
+    return res
 
 
-def _set_env(app_uuid: str, key: str, value: str, secret: bool) -> dict:
-    """Create or update a variable. Secret = runtime only, literal, shown once in the UI."""
+def _set_domain_envs(app_uuid: str, host: str, keys: list[str]) -> tuple[list[str], list[dict]]:
+    """Set each KEY=<host> as a runtime variable (public value: the app's own domain)."""
+    done, errors = [], []
+    for key in dict.fromkeys(keys):
+        try:
+            _set_env(app_uuid, key, host, secret=False, buildtime=False)
+            done.append(key)
+        except Error as e:
+            errors.append({"key": key, "error": str(e)})
+    return done, errors
+
+
+def cmd_env_domain(a):
+    """Set KEY=<the app's domain host> (e.g. NG_ALLOWED_HOSTS) without the value going through the command line."""
+    bad = [k for k in a.keys if not ENV_KEY.fullmatch(k)]
+    if bad:
+        raise Error(f"Invalid variable names: {', '.join(bad)}")
+    app = resolve_app(a.app)
+    fqdn = (api("GET", f"/applications/{app}") or {}).get("fqdn") or ""
+    host = host_of(fqdn.split(",")[0]) if fqdn else ""
+    if not host:
+        raise Error("The app has no domain")
+    done, errors = _set_domain_envs(app, host, a.keys)
+    return {"ok": not errors, "host": host, "env_domain": done, "env_errors": errors}
+
+
+def _set_env(app_uuid: str, key: str, value: str, secret: bool, buildtime: bool | None = None) -> dict:
+    """Create or update a variable. Secret = literal, shown once in the UI, and runtime only unless buildtime=True
+    (needed when the build inlines it, e.g. SvelteKit $env/static). Non-secret: build time too unless buildtime=False."""
     body = {"key": key, "value": value, "is_preview": False, "is_literal": True,
-            "is_buildtime": not secret, "is_runtime": True}
+            "is_buildtime": (not secret) if buildtime is None else buildtime, "is_runtime": True}
     if secret:
         body["is_shown_once"] = True
     existing = api("GET", f"/applications/{app_uuid}/envs") or []
@@ -376,7 +409,8 @@ def cmd_env_push(a):
     """Upload KEY=value lines from a file without the values going through the chat.
 
     Public variables (NEXT_PUBLIC_*, VITE_*…) are also available at build time (they end up in the browser
-    bundle); everything else is runtime only and hidden. Only names are returned.
+    bundle); keys in --buildtime too (secret, but inlined by the build); everything else is runtime only and
+    hidden. Only names are returned.
     """
     app = resolve_app(a.app)
     path = Path(a.file).expanduser()
@@ -384,6 +418,8 @@ def cmd_env_push(a):
         raise Error(f"{path} does not exist")
     result, empty = [], []
     pairs = _read_env_file(path)
+    buildtime = getattr(a, "buildtime", None) or []
+    not_in_file = sorted(set(buildtime) - {k for k, _ in pairs})
     if a.only:
         missing = sorted(set(a.only) - {k for k, _ in pairs})
         if missing:
@@ -394,8 +430,13 @@ def cmd_env_push(a):
             empty.append(key)
             continue
         public = key.startswith(PUBLIC_PREFIXES)
-        result.append({**_set_env(app, key, value, secret=not public), "public": public})
-    return {"ok": True, "variables": result, "skipped_empty": empty}
+        build = public or key in buildtime
+        result.append({**_set_env(app, key, value, secret=not public, buildtime=build), "public": public,
+                       "buildtime": build})
+    res = {"ok": True, "variables": result, "skipped_empty": empty}
+    if not_in_file:  # e.g. DATABASE_URL set by create-postgres: use its --buildtime instead
+        res["buildtime_not_in_file"] = not_in_file
+    return res
 
 
 def _read_env_file(path: Path) -> list[tuple[str, str]]:
@@ -696,13 +737,20 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--environment", default="production"); c.add_argument("--cpus"); c.add_argument("--memory")
     c.add_argument("--dockerfile"); c.add_argument("--base-dir", dest="base_dir")
     c.add_argument("--no-autodeploy", dest="no_autodeploy", action="store_true")
+    c.add_argument("--env-domain", dest="env_domain", action="append", metavar="KEY",
+                   help="set KEY=<the app's domain> as a runtime variable (repeatable), e.g. NG_ALLOWED_HOSTS")
     c.set_defaults(f=cmd_create_app)
+
+    c = s.add_parser("env-domain", help="set KEY=<the app's domain> as a runtime variable (e.g. NG_ALLOWED_HOSTS)")
+    c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_domain)
 
     c = s.add_parser("create-postgres")
     c.add_argument("--project", required=True); c.add_argument("--name", required=True)
     c.add_argument("--app", help="app name in the local registry"); c.add_argument("--app-uuid", dest="app_uuid")
     c.add_argument("--environment", default="production"); c.add_argument("--image", default="postgres:17-alpine")
     c.add_argument("--memory", default="512m")
+    c.add_argument("--buildtime", action="store_true",
+                   help="DATABASE_URL also at build time (when the build inlines it, e.g. SvelteKit $env/static/private)")
     c.set_defaults(f=cmd_create_postgres)
 
     c = s.add_parser("env-set", help="KEY=value (with --stdin the value is read from standard input)")
@@ -719,6 +767,7 @@ def parser() -> argparse.ArgumentParser:
     c = s.add_parser("env-push", help="upload KEY=value lines from a file (values are never printed; empty ones skipped)")
     c.add_argument("app"); c.add_argument("file")
     c.add_argument("--only", nargs="+", metavar="KEY", help="upload only these keys (others in the file are left as they are)")
+    c.add_argument("--buildtime", nargs="+", metavar="KEY", help="also make these keys available at build time")
     c.set_defaults(f=cmd_env_push)
 
     c = s.add_parser("protect", help="HTTP basic auth on the app's domain; the password is saved locally, never printed")

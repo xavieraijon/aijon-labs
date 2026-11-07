@@ -30,16 +30,19 @@ todo en castellano: Claude te responde en tu idioma.
 |---|---|
 | Python con FastAPI | `python-fastapi` (uvicorn) |
 | Python con Flask | `python-flask` (gunicorn) |
-| Servidor Node (Express, Hono, Fastify, NestJS) | `node-server` |
+| Servidor Node (Express, Hono, Fastify, NestJS; Remix, clásico o con script `start`) | `node-server` |
 | Next.js | `nextjs` |
 | SPA: Angular, Vite (React/Vue/Svelte), Create React App | `spa-nginx` |
+| Nuxt, Astro, SvelteKit, Angular SSR, React Router (modo framework) con servidor Node | `node-ssr` |
+| Esos mismos frameworks generados como web estática, y Next.js con `output: 'export'` | `spa-nginx` |
 | Web estática | `static-nginx` |
 | PHP sencillo | `php-apache` |
 | Cualquier proyecto de un solo servicio con su propio `Dockerfile` (de cualquier framework) | se usa tal cual |
 
 Con PostgreSQL privado opcional. **Todavía no** admite (la skill para y lo explica): monorepos, apps de varios
 servicios, apps que necesitan MySQL/MariaDB, MongoDB o Redis y, salvo que traigan su propio `Dockerfile`, Django,
-Laravel/Symfony, Nuxt, Astro y SvelteKit (estáticos o con SSR).
+Laravel/Symfony, Nuxt 2, Angular Universal, Remix con Vite sin script `start`, SolidStart, Qwik City, Vike, TanStack Start, Analog y los proyectos
+preparados para otra plataforma (p. ej. SvelteKit con `adapter-auto` o `@astrojs/vercel`): la skill dice qué cambiar.
 
 ¿Nuevo en Coolify? Empieza por [Coolify desde cero](../../docs/es/coolify-desde-cero.md) antes de la
 configuración de abajo, o deja que te guíe la skill `provision-server`.

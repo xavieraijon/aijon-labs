@@ -75,7 +75,7 @@ def test_domain_check(config, monkeypatch):
 def test_env_push_marks_public_and_secret(config, monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(coolify, "_set_env",
-                        lambda app, k, v, secret: calls.append((k, v, secret)) or {"key": k, "action": "created"})
+                        lambda app, k, v, secret, **_: calls.append((k, v, secret)) or {"key": k, "action": "created"})
     f = make(tmp_path, {"vars.env": "# comment\nDATABASE_URL=postgres://a:b@c/d\nexport NEXT_PUBLIC_URL='https://x'\n\n"})
     r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None))
     assert r["ok"]
@@ -96,7 +96,7 @@ def test_destructive_commands_require_confirmation(config):
 def test_env_push_never_uploads_empty_values(config, monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(coolify, "_set_env",
-                        lambda app, k, v, secret: calls.append(k) or {"key": k, "action": "updated"})
+                        lambda app, k, v, secret, **_: calls.append(k) or {"key": k, "action": "updated"})
     f = make(tmp_path, {"vars.env": "DATABASE_URL=\nAPI_KEY=''\nSTRIPE_KEY=sk_test_x\n"})
     r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None))
     assert calls == ["STRIPE_KEY"]                       # DATABASE_URL set by create-postgres stays intact
@@ -375,7 +375,7 @@ def test_remove_app_images_rejects_unsafe_uuids(monkeypatch):
 
 def test_env_push_only_uploads_the_named_keys(config, monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(coolify, "_set_env", lambda app, k, v, secret: calls.append(k) or {"key": k, "action": "created"})
+    monkeypatch.setattr(coolify, "_set_env", lambda app, k, v, secret, **_: calls.append(k) or {"key": k, "action": "created"})
     f = make(tmp_path, {"vars.env": "OLD_KEY=value-changed-in-the-panel-since\nSENTRY_DSN=https://k@sentry.example.org/1\n"})
     coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=["SENTRY_DSN"]))
     assert calls == ["SENTRY_DSN"]
@@ -495,3 +495,199 @@ def test_verify_accepts_401_only_for_protected_apps():
     assert verify.answered_ok(401, protected=True) and not verify.answered_ok(200, protected=True)  # must be locked
     assert verify.external_ok({"is1": "401", "pl2": None}, protected=True)
     assert not verify.external_ok({"is1": "401"})
+
+
+# ------------------------------------------------------------------ 0.3.0: domain env, build-time env, markers
+
+
+def _create_app_args(**kw):
+    base = dict(project="p", repo="o/r", branch="main", port="4000", domain="web", name="web", environment="production",
+                cpus=None, memory=None, dockerfile=None, base_dir=None, no_autodeploy=False, env_domain=None)
+    return argparse.Namespace(**{**base, **kw})
+
+
+def _fake_create_api(calls, fail_envs=False):
+    def fake(method, path, body=None, query=None):
+        calls.append((method, path, body))
+        if path == "/applications" or path.endswith("/envs") and method == "GET":
+            return []
+        if path.endswith("/envs") and fail_envs:
+            raise coolify.Error("HTTP 500")
+        return {"uuid": APP_UUID}
+    return fake
+
+
+def test_create_app_sets_domain_envs_as_runtime_only(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(coolify, "api", _fake_create_api(calls))
+    r = coolify.cmd_create_app(_create_app_args(env_domain=["NG_ALLOWED_HOSTS"]))
+    assert r["ok"] and r["env_domain"] == ["NG_ALLOWED_HOSTS"] and r["env_errors"] == []
+    env = next(b for m, p, b in calls if m == "POST" and p.endswith("/envs"))
+    assert (env["key"], env["value"], env["is_buildtime"], env["is_runtime"]) == ("NG_ALLOWED_HOSTS", "web.example.org",
+                                                                                  False, True)
+
+
+def test_create_app_keeps_the_uuid_when_the_env_fails(config, monkeypatch):
+    monkeypatch.setattr(coolify, "api", _fake_create_api([], fail_envs=True))
+    r = coolify.cmd_create_app(_create_app_args(env_domain=["NG_ALLOWED_HOSTS"]))
+    assert r["ok"] and r["app_uuid"] == APP_UUID
+    assert r["env_errors"][0]["key"] == "NG_ALLOWED_HOSTS"
+    assert coolify.registry()["web"]["app_uuid"] == APP_UUID
+
+
+def test_create_app_rejects_bad_env_names_before_creating(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(coolify, "api", _fake_create_api(calls))
+    with pytest.raises(coolify.Error):
+        coolify.cmd_create_app(_create_app_args(env_domain=["BAD-KEY"]))
+    assert not [c for c in calls if c[0] == "POST"]
+
+
+def test_env_domain_uses_the_apps_own_domain(config, monkeypatch):
+    sent = []
+
+    def fake(method, path, body=None, query=None):
+        if method == "GET" and path == f"/applications/{APP_UUID}":
+            return {"fqdn": "https://shop.example.org,https://www.shop.example.org"}
+        if method == "POST":
+            sent.append(body)
+        return []
+    monkeypatch.setattr(coolify, "api", fake)
+    r = coolify.cmd_env_domain(argparse.Namespace(app=APP_UUID, keys=["NG_ALLOWED_HOSTS"]))
+    assert r["ok"] and r["host"] == "shop.example.org"
+    assert sent[0]["value"] == "shop.example.org"
+
+
+def test_env_push_buildtime_keeps_secrets_hidden(config, monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(coolify, "_set_env", lambda app, k, v, secret, buildtime=None:
+                        calls.append((k, secret, buildtime)) or {"key": k, "action": "created"})
+    f = make(tmp_path, {"vars.env": "DB_URL=x\nOTHER=y\n"})
+    r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None, buildtime=["DB_URL"]))
+    assert ("DB_URL", True, True) in calls and ("OTHER", True, False) in calls
+    assert {v["key"]: v["buildtime"] for v in r["variables"]} == {"DB_URL": True, "OTHER": False}
+
+
+def test_set_env_secret_at_build_time(config, monkeypatch):
+    sent = []
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None: sent.append(body) or [])
+    coolify._set_env(APP_UUID, "DB_URL", "x", secret=True, buildtime=True)
+    body = sent[-1]
+    assert (body["is_buildtime"], body["is_runtime"], body["is_shown_once"]) == (True, True, True)
+
+
+def test_local_check_adds_args_after_every_from():
+    import local_check
+    out = local_check.with_build_args("FROM node:22 AS build\nRUN x\nfrom nginx\nCOPY a b\n", ["A", "B"])
+    assert out == "FROM node:22 AS build\nARG A\nARG B\nRUN x\nfrom nginx\nARG A\nARG B\nCOPY a b\n"
+
+
+def test_verify_expect_marker(monkeypatch, capsys):
+    monkeypatch.setattr(verify, "certificate", lambda host: {"valid": True})
+    monkeypatch.setattr(verify, "fetch", lambda url, follow=True: (301, "https://x/") if not follow else (200, ""))
+    for page, protected, expected in (("<app-root ng-server-context=\"ssr\">", False, True),
+                                      ("<app-root></app-root>", False, False), ("", True, None)):
+        monkeypatch.setattr(verify, "body", lambda url, page=page: page)
+        argv = ["verify.py", "https://web.example.org", "--expect", "ng-server-context"] + (["--protected"] * protected)
+        monkeypatch.setattr(sys, "argv", argv)
+        verify.main()
+        res = json.loads(capsys.readouterr().out)
+        assert res["marker_found"] == expected
+        if expected is False:
+            assert res["ok"] is False
+
+
+def test_init_ignores_the_build_output_only_when_the_image_builds_it(tmp_path):
+    sk = make(tmp_path / "sk", {"package.json": json.dumps({"devDependencies": {"@sveltejs/kit": "^3"}}),
+                                "svelte.config.js": "import a from '@sveltejs/adapter-node'\nexport default {}"})
+    assert repo.build_output(sk) == ["build/"]
+    ng = make(tmp_path / "ng", {"package.json": json.dumps({"dependencies": {"@angular/core": "^20"}}),
+                                "angular.json": json.dumps({"projects": {"w": {"architect": {"build": {
+                                    "builder": "@angular/build:application", "options": {"outputPath": "dist/w"}}}}}})})
+    assert repo.build_output(ng) == ["dist/"]
+    nuxt = make(tmp_path / "nuxt", {"package.json": json.dumps({"dependencies": {"nuxt": "^4"}})})
+    assert repo.build_output(nuxt) == []                       # .output/ is already in the base .gitignore
+    site = make(tmp_path / "site", {"index.html": "<h1>x</h1>", "build/logo.png": "x"})
+    assert repo.build_output(site) == []                       # static-nginx copies build/ as is: keep it
+
+
+def test_create_postgres_buildtime_flag(config, monkeypatch):
+    calls = []
+    monkeypatch.setattr(coolify, "api", lambda method, path, body=None, query=None: {"uuid": "d" * 24})
+    monkeypatch.setattr(coolify, "_set_env", lambda app, k, v, secret, buildtime=None:
+                        calls.append((k, secret, buildtime)) or {})
+    for flag in (False, True):
+        coolify.cmd_create_postgres(argparse.Namespace(project="p", name="blog", app="blog", app_uuid=APP_UUID,
+                                                       environment="production", image="postgres:17-alpine",
+                                                       memory="512m", buildtime=flag))
+    assert calls == [("DATABASE_URL", True, False), ("DATABASE_URL", True, True)]
+
+
+def test_env_push_reports_buildtime_keys_missing_from_the_file(config, monkeypatch, tmp_path):
+    monkeypatch.setattr(coolify, "_set_env", lambda *a, **k: {"key": a[1], "action": "created"})
+    f = make(tmp_path, {"vars.env": "API_KEY=x\n"})
+    r = coolify.cmd_env_push(argparse.Namespace(app=APP_UUID, file=str(f / "vars.env"), only=None,
+                                                buildtime=["API_KEY", "DATABASE_URL"]))
+    assert r["buildtime_not_in_file"] == ["DATABASE_URL"]
+
+
+def test_extra_env_override_is_validated():
+    assert prepare.values({"stack": {}}, {"EXTRA_ENV": " A=x B=y/z"})["EXTRA_ENV"] == " A=x B=y/z"
+    for bad in (" A=x\nRUN id", "A=x", " A", " A=x;y", " BAD-KEY=x"):
+        with pytest.raises(ValueError):
+            prepare.values({"stack": {}}, {"EXTRA_ENV": bad})
+
+
+# ------------------------------------------------------------------ local_check.py (docker mocked)
+
+
+class _Done:
+    def __init__(self, code=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = code, out, err
+
+
+@pytest.fixture
+def docker(monkeypatch):
+    import local_check
+    calls, files = [], {}
+
+    def fake_run(*cmd, timeout=None):
+        calls.append(cmd)
+        if cmd[:2] == ("docker", "build") and "-f" in cmd:
+            files["dockerfile"] = Path(cmd[cmd.index("-f") + 1]).read_text()
+            files["path"] = cmd[cmd.index("-f") + 1]
+        return _Done()
+    monkeypatch.setattr(local_check, "run", fake_run)
+    monkeypatch.setattr(local_check, "fetch", lambda url: (200, "text/html"))
+    monkeypatch.setattr(local_check.time, "sleep", lambda s: None)
+    return local_check, calls, files
+
+
+def test_local_check_build_env_and_cleanup(tmp_path, docker, monkeypatch, capsys):
+    local_check, calls, files = docker
+    make(tmp_path, {"Dockerfile": "FROM node:22 AS build\nRUN npm run build\nFROM node:22\nCMD x\n"})
+    monkeypatch.setattr(local_check, "body", lambda url: '<app-root ng-server-context="ssr">')
+    with pytest.raises(SystemExit) as e:
+        local_check.main([str(tmp_path), "--port", "3000", "--build-env", "DB_URL=test", "--expect", "ng-server-context"])
+    res = json.loads(capsys.readouterr().out)
+    assert e.value.code == 0 and res["ok"] and res["marker_found"] and res["cleaned_up"]
+    build = next(c for c in calls if c[:2] == ("docker", "build"))
+    assert ("--build-arg", "DB_URL=test") == build[build.index("--build-arg"):build.index("--build-arg") + 2]
+    assert files["dockerfile"].count("ARG DB_URL") == 2
+    assert not Path(files["path"]).exists()                                   # temporary Dockerfile removed
+    assert (tmp_path / "Dockerfile").read_text().count("ARG") == 0              # the project's file is untouched
+
+
+def test_local_check_failures_exit_non_zero(tmp_path, docker, monkeypatch, capsys):
+    local_check, calls, _ = docker
+    make(tmp_path, {"Dockerfile": "FROM node:22\n"})
+    for argv, error in (([str(tmp_path), "--port", "1", "--build-env", "BAD-KEY=x"], "invalid --build-env"),
+                        ([str(tmp_path / "missing"), "--port", "1", "--build-env", "A=x"], "no Dockerfile")):
+        with pytest.raises(SystemExit) as e:
+            local_check.main(argv)
+        assert e.value.code == 1 and error in json.loads(capsys.readouterr().out)["error"]
+    monkeypatch.setattr(local_check, "body", lambda url: "<app-root></app-root>")
+    with pytest.raises(SystemExit) as e:
+        local_check.main([str(tmp_path), "--port", "1", "--expect", "ng-server-context"])
+    res = json.loads(capsys.readouterr().out)
+    assert e.value.code == 1 and res["marker_found"] is False and res["stage"] == "routes"

@@ -6,6 +6,46 @@ All notable changes to the plugins of this marketplace. The format is based on
 
 ## coolify-ops
 
+### Unreleased (0.3.0)
+
+#### Added
+- `deploy-app` deploys Nuxt, Astro, SvelteKit, Angular with SSR and React Router (framework mode) without a
+  Dockerfile of their own. The analysis reads their configuration (never runs it) and picks a Node server (new
+  `node-ssr` template) or a static site served by nginx. Next.js with `output: 'export'` is served as a static
+  site.
+- Projects that cannot run on a plain server (SvelteKit `adapter-auto`, Astro or Nitro adapters for other
+  platforms, Nuxt 2, Angular Universal) are blocked with the exact change that would make them deployable.
+- `create-app --env-domain KEY` and `env-domain <app> KEY…` set a variable to the app's own domain (used for
+  Angular's `NG_ALLOWED_HOSTS`). If the variable fails, `create-app` still returns the app's uuid.
+- `env-push --buildtime KEY…` and `create-postgres --buildtime` make secret variables available at build time
+  (SvelteKit `$env/static/*`, which the analysis now detects and lists in `build_time_env`). `env-push` reports
+  `--buildtime` keys missing from the file.
+- `local_check.py --build-env KEY=value` (build-time test values, through `ARG` lines in a temporary copy of the
+  Dockerfile, as Coolify does) and `--expect TEXT`; `verify.py --expect TEXT` checks the page body (e.g. that
+  Angular rendered it on the server).
+
+#### Changed
+- `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
+  `index.csr.html`, `__spa-fallback.html`) and no HTML page is cached. Static sites that are not single-page apps
+  get `nginx-static.conf`, which now serves the site's own `404.html`.
+- `prepare.py` refuses build folders, fallback files and environment values read from the project's config that
+  are not plain paths or names, before writing anything.
+- Angular 21 builds with Node 22 and Angular 22 with Node 24.
+- `deploy-app` no longer assumes it must create the database: if the user brings their own PostgreSQL,
+  `DATABASE_URL` is handled like any other variable and the summary says «external».
+- `local_check.py` exits with a non-zero code when the check fails, and reports a missing Dockerfile as JSON.
+- `repo.py init` also ignores the build output folder (`dist/`, `build/`…) when the image builds it, so a local
+  build (which may hold inlined build-time values) is not committed. Plain static sites are not affected.
+- Build folders of the new frameworks (`.output`, `.nuxt`, `.svelte-kit`, `.astro`, `.react-router`) are left out
+  of the image, the analysis and the `.gitignore` written for new repositories.
+
+#### Fixed
+- React Router, Remix with Vite, SolidStart, Qwik City, Vike and TanStack Start projects were treated as a Vite
+  single-page app served from `dist/`, which deployed a broken site without any warning; Analog was treated as a
+  plain Angular app. Classic Remix keeps working with the `node-server` template.
+- Angular with SSR was deployed with the static template and only a warning.
+- Next.js with `output: 'export'` got the `nextjs` template, whose `next start` refuses to run with that option.
+
 ### 0.2.1 — 2026-11-07
 
 #### Fixed

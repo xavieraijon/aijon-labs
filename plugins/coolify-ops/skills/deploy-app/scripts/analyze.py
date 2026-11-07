@@ -17,7 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".angular",
+IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".angular", ".output",
+                ".nuxt", ".svelte-kit", ".astro", ".react-router",
                 ".nx", "vendor", ".cache", "coverage", ".turbo", ".pytest_cache", ".ruff_cache"}
 MAX_FILE = 400_000  # bytes: larger files are not scanned
 
@@ -43,7 +44,7 @@ PAID_SERVICE_HINTS = ["stripe", "groq", "openai", "anthropic", "elevenlabs", "re
                       "@google/genai", "google.generativeai", "mailgun", "resend"]
 
 # Angular major version → Node version it builds with
-NODE_FOR_ANGULAR = {12: "14", 13: "16", 14: "16", 15: "18", 16: "18", 17: "20", 18: "20", 19: "22", 20: "22"}
+NODE_FOR_ANGULAR = {12: "14", 13: "16", 14: "16", 15: "18", 16: "18", 17: "20", 18: "20", 19: "22", 20: "22", 21: "22", 22: "24"}
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".woff", ".woff2", ".ttf",
                    ".mp3", ".mp4", ".lock"}
 LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
@@ -118,7 +119,7 @@ def env_vars_used(root: Path, files: list[Path]) -> dict:
                 if m:
                     example[m.group(1)] = bool(m.group(2).strip().strip("\"'"))
             break
-    in_code = set()
+    in_code, build_time = set(), set()
     patterns = [r"os\.(?:environ\.get|getenv)\(\s*['\"]([A-Z_][A-Z0-9_]*)", r"os\.environ\[\s*['\"]([A-Z_][A-Z0-9_]*)",
                 r"process\.env\.([A-Z_][A-Z0-9_]*)", r"process\.env\[\s*['\"]([A-Z_][A-Z0-9_]*)",
                 r"import\.meta\.env\.([A-Z_][A-Z0-9_]*)", r"env\(\s*['\"]([A-Z_][A-Z0-9_]*)",
@@ -129,8 +130,12 @@ def env_vars_used(root: Path, files: list[Path]) -> dict:
         text = read(f)
         for p in patterns:
             in_code.update(re.findall(p, text))
+        # SvelteKit: names imported from $env/static/* are inlined at build time
+        for names in re.findall(r"import\s*\{([^}]*)\}\s*from\s*['\"]\$env/static/(?:private|public)['\"]", text):
+            build_time.update(m.group(1) for part in names.split(",")
+                              if (m := re.match(r"\s*([A-Z_][A-Z0-9_]*)\b", part)))
     ignored = {"NODE_ENV", "PORT", "HOST", "PATH", "HOME", "PWD", "CI", "DEBUG", "TZ", "LANG"}
-    return {"example": example, "in_code": sorted(in_code - ignored)}
+    return {"example": example, "in_code": sorted((in_code | build_time) - ignored), "build_time": sorted(build_time)}
 
 
 def detect_monorepo(root: Path, files: list[Path]) -> list[str]:
@@ -157,6 +162,231 @@ def detect_monorepo(root: Path, files: list[Path]) -> list[str]:
     return reasons
 
 
+def strip_comments(text: str) -> str:
+    """Remove // and /* */ comments from JS/TS source, leaving string literals intact."""
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        c = text[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+            out.append(c)
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def top_level(text: str, start: int) -> str:
+    """Text of the object literal opening at text[start] == '{', with every nested {…}/[…]/(…) removed."""
+    out, depth, i, quote = [], 0, start, None
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if depth == 1:
+                out.append(c)
+            if c == "\\":
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+            if depth == 1:
+                out.append(c)
+        elif c in "{[(":
+            depth += 1
+        elif c in "}])":
+            depth -= 1
+            if depth == 0:
+                break
+        elif depth == 1:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def config_text(root: Path, base: str) -> str | None:
+    """Comment-free text of <base>.{ts,js,mjs,mts,cjs,cts}, or None if there is no such file."""
+    for ext in ("ts", "js", "mjs", "mts", "cjs", "cts"):
+        p = root / f"{base}.{ext}"
+        if p.exists():
+            return strip_comments(read(p))
+    return None
+
+
+def literal(text: str, key: str) -> tuple[bool, str | None]:
+    """(key present, its value if it is a plain string literal)."""
+    m = re.search(rf"\b{key}\s*:\s*(\S)", text)
+    if not m:
+        return False, None
+    v = re.match(r"""(['"`])([^'"`$\\]*)\1""", text[m.start(1):])
+    return True, v.group(2) if v else None
+
+
+def blocked(r: dict, framework: str, reason: str) -> dict:
+    r.update(framework=framework, template=None, warning_framework=reason)
+    return r
+
+
+def static_site(r: dict, framework: str, build_cmd: str, build_dir: str, spa: bool, fallback: str = "index.html") -> dict:
+    r.update(framework=framework, template="spa-nginx", port=80, render="static", build_cmd=build_cmd,
+             build_dir=build_dir.strip("/") or ".", spa=spa)
+    if spa:
+        r["spa_fallback"] = fallback
+    return r
+
+
+def ssr_server(r: dict, framework: str, build_cmd: str, build_dir: str, start: list[str], port: int,
+               extra_env: dict | None = None) -> dict:
+    r.update(framework=framework, template="node-ssr", port=port, render="server", build_cmd=build_cmd,
+             build_dir=build_dir.strip("/"), start_cmd=start, extra_env=extra_env or {}, runtime_env={})
+    return r
+
+
+# Vite/Angular-based meta-frameworks without a template: always blocked, never treated as a plain SPA.
+META_BLOCKED = {"@analogjs/platform": "Analog", "@solidjs/start": "SolidStart", "@builder.io/qwik-city": "Qwik City",
+                "vike": "Vike", "@tanstack/react-start": "TanStack Start", "@tanstack/solid-start": "TanStack Start",
+                "@tanstack/start": "TanStack Start"}
+ASTRO_PLATFORM_ADAPTERS = ("@astrojs/vercel", "@astrojs/netlify", "@astrojs/cloudflare", "@astrojs/deno")
+
+
+def analyze_nuxt(root: Path, r: dict, deps: dict, scripts: dict) -> dict:
+    if (major(deps["nuxt"]) or 99) < 3:
+        return blocked(r, "nuxt", "Nuxt 2 is not supported (end of life): upgrade to Nuxt 3+ or add your own Dockerfile")
+    text = config_text(root, "nuxt.config") or ""
+    build = scripts.get("build", "")
+    m = re.search(r"\bdefineNuxtConfig\s*\(\s*\{", text) or re.search(r"export\s+default\s*\{", text)
+    top = top_level(text, m.end() - 1) if m else ""
+    spa = bool(re.search(r"\bssr\s*:\s*false\b", top))
+    nested_ssr = len(re.findall(r"\bssr\s*:", text)) > len(re.findall(r"\bssr\s*:", top))
+    if "routeRules" in text and nested_ssr:
+        r["warning_route_rules"] = "Nuxt routeRules set per-route rendering: deployed as a Node server"
+    env_preset = re.search(r"\bNITRO_PRESET=([\w-]+)", build)
+    _, cfg_preset = literal(text, "preset")
+    preset = env_preset.group(1) if env_preset else cfg_preset
+    if preset and preset not in {"node", "node-server", "static"}:
+        return blocked(r, "nuxt", f"Nuxt is built with the Nitro preset «{preset}», which does not run on a plain "
+                                  "server: remove it (default node-server) or use 'static', or add your own Dockerfile")
+    if spa or preset == "static" or "nuxt generate" in build:
+        cmd = "npm run build" if "generate" in build or preset == "static" else "npx nuxt generate"
+        if (root / "server").is_dir():
+            r["warning_server_dir"] = "Nuxt is deployed as a static site: the routes in server/ will not work"
+        return static_site(r, "nuxt", cmd, ".output/public", spa=spa, fallback="200.html")
+    return ssr_server(r, "nuxt", "npm run build", ".output", ["node", ".output/server/index.mjs"], 3000)
+
+
+def analyze_astro(root: Path, r: dict, deps: dict) -> dict:
+    text = config_text(root, "astro.config") or ""
+    other = next((a for a in ASTRO_PLATFORM_ADAPTERS if a in deps), None)
+    if other:
+        return blocked(r, "astro", f"Astro uses the {other} adapter, made for another platform: replace it with "
+                                   "@astrojs/node (mode: 'standalone') or remove it for a static site")
+    if "@astrojs/node" in deps:
+        _, mode = literal(text, "mode")
+        if mode == "standalone":
+            return ssr_server(r, "astro", "npm run build", "dist", ["node", "dist/server/entry.mjs"], 4321)
+        return blocked(r, "astro", "Astro's @astrojs/node adapter must use mode: 'standalone' to run on its own "
+                                   f"(found: {mode or 'not set'}), or add your own Dockerfile")
+    if literal(text, "output")[1] == "server":
+        return blocked(r, "astro", "Astro has output: 'server' but no adapter: install @astrojs/node "
+                                   "(mode: 'standalone'), or remove output: 'server' for a static site")
+    return static_site(r, "astro", "npm run build", "dist", spa=False)
+
+
+def analyze_sveltekit(root: Path, r: dict) -> dict:
+    text = config_text(root, "svelte.config") or ""
+    m = re.search(r"""from\s+['"]@sveltejs/adapter-([\w-]+)['"]""", text)
+    adapter = m.group(1) if m else "auto"
+    hint = ("install @sveltejs/adapter-node (server) or @sveltejs/adapter-static (static site) and use it in "
+            "svelte.config.js")
+    if adapter == "node":
+        has_out, out = literal(text, "out")
+        has_prefix, prefix = literal(text, "envPrefix")
+        if has_out and out is None:
+            r["warning_config"] = "adapter-node «out» is not a plain string: using the default «build»"
+        env = {"PROTOCOL_HEADER": "x-forwarded-proto", "HOST_HEADER": "x-forwarded-host"}
+        if has_prefix and prefix is None:
+            r["warning_env_prefix"] = ("adapter-node envPrefix is not a plain string: set PORT, HOST, PROTOCOL_HEADER "
+                                       "and HOST_HEADER with your prefix by hand")
+        elif prefix:
+            env = {f"{prefix}{k}": v for k, v in {**env, "PORT": "3000", "HOST": "0.0.0.0"}.items()}
+        out = out or "build"
+        return ssr_server(r, "sveltekit", "npm run build", out, ["node", f"{out}/index.js"], 3000, env)
+    if adapter == "static":
+        has_pages, pages = literal(text, "pages")
+        if has_pages and pages is None:
+            r["warning_config"] = "adapter-static «pages» is not a plain string: using the default «build»"
+        _, fallback = literal(text, "fallback")
+        return static_site(r, "sveltekit", "npm run build", pages or "build", spa=bool(fallback),
+                           fallback=fallback or "index.html")
+    return blocked(r, "sveltekit", f"SvelteKit uses adapter-{adapter}, which cannot run on a plain server: {hint}")
+
+
+def analyze_react_router(root: Path, r: dict, pkg: dict) -> dict:
+    text = config_text(root, "react-router.config") or ""
+    if "@react-router/serve" not in (pkg.get("dependencies") or {}) and not re.search(r"\bssr\s*:\s*false\b", text):
+        return blocked(r, "react-router", "React Router needs @react-router/serve in «dependencies» to run its server "
+                                          "(npm install @react-router/serve), or add your own Dockerfile")
+    has_dir, build_dir = literal(text, "buildDirectory")
+    has_file, server_file = literal(text, "serverBuildFile")
+    if (has_dir and build_dir is None) or (has_file and server_file is None):
+        return blocked(r, "react-router", "react-router.config sets buildDirectory/serverBuildFile with code, not a "
+                                          "plain string: add your own Dockerfile")
+    build_dir = build_dir or "build"
+    if re.search(r"\bssr\s*:\s*false\b", text):
+        fallback = "__spa-fallback.html" if re.search(r"\bprerender\s*:", text) else "index.html"
+        return static_site(r, "react-router", "npm run build", f"{build_dir}/client", spa=True, fallback=fallback)
+    serve = ["./node_modules/.bin/react-router-serve", f"{build_dir}/server/{server_file or 'index.js'}"]
+    return ssr_server(r, "react-router", "npm run build", build_dir, serve, 3000)
+
+
+def analyze_angular(root: Path, r: dict, deps: dict) -> dict:
+    ng = major(deps["@angular/core"]) or 99
+    if any(k.startswith("@nguniversal/") for k in deps):
+        return blocked(r, "angular", "Angular Universal (@nguniversal) is not supported: migrate to @angular/ssr "
+                                     "(ng update) or add your own Dockerfile")
+    project, out_dir, opts, builder = None, None, {}, ""
+    try:
+        ang = json.loads(read(root / "angular.json"))
+        project = ang.get("defaultProject") or next(iter(ang["projects"]))
+        build = ang["projects"][project]["architect"]["build"]
+        opts, builder = build.get("options") or {}, build.get("builder", "")
+        out_dir = opts.get("outputPath")
+        if isinstance(out_dir, dict):
+            out_dir = out_dir.get("base")
+    except (json.JSONDecodeError, KeyError, StopIteration, AttributeError):
+        pass
+    base = out_dir or (f"dist/{project}" if project else "dist")
+    modern = builder.endswith(":application") or ng >= 17
+    ssr = bool(opts.get("ssr")) or bool(opts.get("prerender"))
+    browser = f"{base}/browser" if modern else base
+    if not (modern and opts.get("ssr")) or opts.get("outputMode") == "static":
+        return static_site(r, "angular", "npx ng build --configuration production", browser, spa=True,
+                           fallback="index.csr.html" if modern and ssr else "index.html")
+    ssr_server(r, "angular", "npx ng build --configuration production", base,
+               ["node", f"{base}/server/server.mjs"], 4000,
+               {"NG_TRUST_PROXY_HEADERS": "x-forwarded-proto,x-forwarded-host"})
+    if not (opts.get("security") or {}).get("allowedHosts"):
+        r["runtime_env"] = {"NG_ALLOWED_HOSTS": "{domain}"}
+    r["ssr_marker"] = "ng-server-context"
+    return r
+
+
 def analyze_node(root: Path) -> dict:
     pkg = json.loads(read(root / "package.json") or "{}")
     deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
@@ -165,8 +395,8 @@ def analyze_node(root: Path) -> dict:
     nvmrc = read(root / ".nvmrc").strip() or read(root / ".node-version").strip()
     r: dict = {"language": "node", "key_dependencies": {k: deps[k] for k in deps if k in {
         "next", "react", "vue", "svelte", "@angular/core", "vite", "express", "hono", "fastify", "@nestjs/core",
-        "nuxt", "astro", "@sveltejs/kit", "typescript", "prisma", "@prisma/client", "drizzle-orm", "pg", "mysql2",
-        "mongoose", "redis", "ioredis"}}}
+        "nuxt", "astro", "@sveltejs/kit", "@react-router/dev", "@remix-run/dev", "typescript", "prisma",
+        "@prisma/client", "drizzle-orm", "pg", "mysql2", "mongoose", "redis", "ioredis"}}}
     node = major(nvmrc) or major(engines_node)
     if "@angular/core" in deps and not node:
         node = int(NODE_FOR_ANGULAR.get(major(deps["@angular/core"]) or 0, "22"))
@@ -176,46 +406,44 @@ def analyze_node(root: Path) -> dict:
     if pm == "npm" and not (root / "package-lock.json").exists():
         r["warning_lock"] = "no package-lock.json: the build will use npm install (less reproducible)"
 
+    meta = next((k for k in META_BLOCKED if k in deps), None)
+    if meta:
+        return blocked(r, META_BLOCKED[meta], f"{META_BLOCKED[meta]} has no template yet: add your own Dockerfile "
+                                              "(it will be used as is)")
     if "next" in deps:
+        text = config_text(root, "next.config") or ""
+        if literal(text, "output")[1] == "export":
+            return static_site(r, "nextjs", "npm run build", literal(text, "distDir")[1] or "out", spa=False)
         r.update(framework="nextjs", template="nextjs", port=3000)
     elif "@angular/core" in deps:
-        out_dir, ssr = None, False
-        try:
-            ang = json.loads(read(root / "angular.json"))
-            project = ang.get("defaultProject") or next(iter(ang["projects"]))
-            build = ang["projects"][project]["architect"]["build"]
-            opts = build["options"]
-            out_dir = opts.get("outputPath")
-            if isinstance(out_dir, dict):
-                out_dir = out_dir.get("base")
-            if build["builder"].endswith(":application") or (major(deps["@angular/core"]) or 0) >= 17:
-                out_dir = f"{out_dir}/browser"  # the modern builder adds /browser
-            ssr = "server" in opts or "ssr" in opts
-        except (json.JSONDecodeError, KeyError, StopIteration):
-            pass
-        r.update(framework="angular", template="spa-nginx", port=80, spa=True,
-                 build_cmd="npx ng build --configuration production", build_dir=out_dir or "dist")
-        if ssr:
-            r["warning_ssr"] = "Angular with SSR: the static template does not fit; review manually"
-    elif any(k in deps for k in ("nuxt", "astro", "@sveltejs/kit")):
-        r.update(framework=next(k for k in ("nuxt", "astro", "@sveltejs/kit") if k in deps), template=None,
-                 warning_framework="framework with its own SSR server: no template yet")
-    elif "vite" in deps and not any(k in deps for k in ("express", "hono", "fastify", "@nestjs/core")):
-        r.update(framework="vite", template="spa-nginx", port=80, spa=True,
+        analyze_angular(root, r, deps)
+    elif "nuxt" in deps:
+        analyze_nuxt(root, r, deps, scripts)
+    elif "astro" in deps:
+        analyze_astro(root, r, deps)
+    elif "@sveltejs/kit" in deps:
+        analyze_sveltekit(root, r)
+    elif "@react-router/dev" in deps:
+        analyze_react_router(root, r, pkg)
+    elif "@remix-run/dev" in deps and "vite" in deps and "start" not in scripts:
+        return blocked(r, "remix", "Remix with Vite and no «start» script: add \"start\": \"remix-serve "
+                            "./build/server/index.js\" to package.json, upgrade to React Router, or add your own Dockerfile")
+    elif "vite" in deps and not any(k in deps for k in ("express", "hono", "fastify", "@nestjs/core", "@remix-run/dev")):
+        r.update(framework="vite", template="spa-nginx", port=80, spa=True, spa_fallback="index.html",
                  build_cmd=f"{pm} run build", build_dir="dist")
     elif "react-scripts" in deps:
-        r.update(framework="create-react-app", template="spa-nginx", port=80, spa=True,
+        r.update(framework="create-react-app", template="spa-nginx", port=80, spa=True, spa_fallback="index.html",
                  build_cmd=f"{pm} run build", build_dir="build")
     else:
-        fw = next((k for k in ("@nestjs/core", "hono", "fastify", "express") if k in deps), "node")
+        fw = next((k for k in ("@remix-run/dev", "@nestjs/core", "hono", "fastify", "express") if k in deps), "node")
         port = 3000
         for f in list(root.glob("src/**/*.[tj]s"))[:200] + list(root.glob("*.[tj]s")):
             m = re.search(r"(?:listen|port)\D{0,40}?(\d{4,5})", read(f))
             if m:
                 port = int(m.group(1))
                 break
-        r.update(framework=fw, template="node-server", port=port, has_build="build" in scripts,
-                 has_start="start" in scripts)
+        r.update(framework="remix" if fw == "@remix-run/dev" else fw, template="node-server", port=port,
+                 has_build="build" in scripts, has_start="start" in scripts)
         if "start" not in scripts:
             r["warning_start"] = "package.json has no «start» script: the start command must be specified"
     return r
@@ -312,6 +540,11 @@ def analyze(root: Path) -> dict:
 
     # --- variables, databases, login, paid services
     res["env_vars"] = env_vars_used(root, files)
+    if res["env_vars"]["build_time"]:
+        res["build_time_env"] = res["env_vars"]["build_time"]
+        warnings.append("variables imported from $env/static are needed at build time ("
+                        + ", ".join(res["build_time_env"]) + "): upload them with env-push --buildtime, and pass test "
+                        "values with --build-env to the local check")
     manifests = " ".join(read(f).lower() for f in files if f.name in {*MANIFESTS, "schema.prisma", "drizzle.config.ts"})
     names = set(res["env_vars"]["in_code"]) | set(res["env_vars"]["example"])
     dbs = []

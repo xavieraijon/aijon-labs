@@ -58,11 +58,14 @@ plugin.
 7. If the server is above 80 °C or its disk above 90 %, warn and do not build.
 8. **At most 2 automatic retries** per build/start failure, changing deployment files only. Then stop and
    explain using the last log lines.
-9. Scope: **single-service** apps (Python FastAPI/Flask, Node, Next.js, SPA, static, plain PHP) with optional
-   PostgreSQL, plus any single-service project with **its own `Dockerfile`** (used as is, whatever the framework).
-   Without their own Dockerfile, Django, Laravel/Symfony and Nuxt/Astro/SvelteKit are not covered yet. Monorepos,
-   multi-service apps and apps that need MySQL/MariaDB, MongoDB or Redis are not covered either. In all these
-   cases: **stop and explain** (the analysis reports them as `blockers`).
+9. Scope: **single-service** apps (Python FastAPI/Flask, Node, Next.js, SPA, static, plain PHP; Nuxt, Astro,
+   SvelteKit, Angular SSR and React Router as a static site or a Node server) with optional PostgreSQL, plus any
+   single-service project with **its own `Dockerfile`** (used as is, whatever the framework). Without their own
+   Dockerfile, Django, Laravel/Symfony, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
+   Cloudflare, SvelteKit `adapter-auto`…), SolidStart, Qwik City, Vike, TanStack Start and Analog are not covered
+   yet. Monorepos, multi-service apps and apps that need MySQL/MariaDB, MongoDB or Redis are not covered either.
+   In all these cases: **stop and explain** (the analysis reports them as `blockers`, with the change that would
+   make the project deployable; the skill never makes that change itself, rule 6).
 
 ---
 
@@ -84,10 +87,14 @@ plugin.
 - Given `owner/repo` not present locally: `gh repo clone owner/repo <projects_dir>/<repo>` (`projects_dir` comes
   from `config.json`; new projects are also created there).
 - `G state <path>`. Not a repository (`is_repo` false): `G init <path>` first — it creates `.gitignore` if missing
-  (dependencies, build caches, `.env*`) so the analysis below sees the project as it would be pushed. Git is only
+  (dependencies, build caches, `.env*`, and the build output folder listed in `ignored_build_output` when the
+  image builds it) so the analysis below sees the project as it would be pushed. Git is only
   ever used through `repo.py`, never directly.
 - `A <path>` and read: `deployable`, `blockers`, `warnings`, `stack`, `env_vars`, `databases`, `secrets`,
-  `has_login_estimate`, `paid_services_estimate`, `git`, `suggested_name`.
+  `has_login_estimate`, `paid_services_estimate`, `git`, `suggested_name`, and when present `build_time_env`.
+  For the frameworks that can be static or a server, `stack.render` says which (`static` → nginx, `server` →
+  Node); `stack.runtime_env` lists variables set from the domain at creation (e.g. `NG_ALLOWED_HOSTS`) and
+  `stack.ssr_marker` a text that proves server rendering.
 - From here on, `<name>` = the name the user gave, else `suggested_name`; `<port>` = `stack.port`;
   `<path>` = the project folder.
 - No GitHub remote yet: the owner is `gh api user -q .login` unless the user names an organisation; the repository
@@ -100,6 +107,12 @@ plugin.
 ### C · Preparation and local check
 1. `P <path>` (use `--var KEY=value` if the analysis got something wrong, e.g. `--var PORT=8080`).
 2. `L <path> --port <port> --routes / [other relevant routes]` (add `--env` with test values only).
+   - `build_time_env` present: also `--build-env KEY=<test value>` for each of those keys (the build inlines them
+     and fails without them). Test values only, never the real ones.
+   - `stack.runtime_env` has `NG_ALLOWED_HOSTS`: add `--env NG_ALLOWED_HOSTS=localhost,127.0.0.1` (Angular answers
+     400 to any other host).
+   - `stack.ssr_marker` present: add `--expect <ssr_marker>`; `marker_found: false` means the page was not
+     rendered on the server (a failure, rule 8).
    If the app needs a database (`databases` not empty), there is none locally: probe only routes that do not use
    it. A failure caused only by the missing database (connection refused / unknown host in `container_logs`) is
    **not** a build failure: report «build OK, start needs the database» and do not apply rule 8.
@@ -117,16 +130,20 @@ App:          <name>  (<framework>, <template or own Dockerfile>)
 Repo:         <owner/repo> · branch <branch> · <what must be pushed: commits / new repo (+ give the GitHub App access) / nothing>
 Domain:       https://<name>.<base_domain>   (<available ✔ | reason>)
 Access:       public | protected with user and password
-Database:     no | PostgreSQL 17 (new, private)
-Variables:    <names> (values in ~/.config/coolify-ops/secrets/<name>.env) | none
+Database:     no | PostgreSQL 17 (new, private) | external (DATABASE_URL supplied by you, with the variables)
+Variables:    <names> (values in ~/.config/coolify-ops/secrets/<name>.env; mark build-time ones) | none
+              + <keys of stack.runtime_env> = the domain (set automatically)
 Resources:    max <cpus> CPU / <memory>
 Auto-deploy:  yes (every push publishes) | no
 Warnings:     <list or «none»>
 Local check:  OK (<seconds> s build, routes <…>)
 ```
+If `build_time_env` lists secret keys, add to «Warnings»: «<keys> are needed at build time: Coolify passes them
+as build arguments, so their values stay in the image history on the server (not in logs)».
 If variables are needed, `C env-template <name> KEY1 KEY2 …` with the names from `env_vars` (it creates
 `~/.config/coolify-ops/secrets/<name>.env` with empty keys, mode 600, and never touches existing values). **Leave
-out `DATABASE_URL` when the skill creates the database** (step E4 sets it). Ask the user to fill in the values in
+out `DATABASE_URL` when the skill creates the database** (step E4 sets it); include it when the database is
+external. Ask the user to fill in the values in
 that file (never in the chat). Wait for their «yes».
 
 ### E · Execution (no more questions)
@@ -136,11 +153,18 @@ that file (never in the chat). Wait for their «yes».
    → Repository access → add <owner>/<name> → Save*. Wait for their «done».
 2. `C create-project <name>` → `project_uuid`.
 3. `C create-app --project <uuid> --repo <owner/repo> --branch <branch> --port <port> --domain <name> --name <name>`
-   (+ `--cpus`/`--memory` to override defaults, `--no-autodeploy` if chosen) → `app_uuid`.
-4. With PostgreSQL: `C create-postgres --project <uuid> --name <name> --app <name> --app-uuid <app_uuid>`
+   (+ `--cpus`/`--memory` to override defaults, `--no-autodeploy` if chosen, `--env-domain <KEY>` for each key of
+   `stack.runtime_env`) → `app_uuid`. If `env_errors` is not empty the app **was** created: retry once with
+   `C env-domain <name> <KEY…>`; if it fails again, stop and explain (nothing to undo; the variable can be set
+   later the same way).
+4. With PostgreSQL, unless the user said they bring their own database (then `DATABASE_URL` is a variable like
+   any other, uploaded in step E5, with `--buildtime` if it is in `build_time_env`):
+   `C create-postgres --project <uuid> --name <name> --app <name> --app-uuid <app_uuid>`
    (creates a private database and sets `DATABASE_URL` on the app; the password is generated by the script and
-   never shown).
-5. With variables: `C env-push <name> ~/.config/coolify-ops/secrets/<name>.env`. Empty values are never uploaded:
+   never shown). Add `--buildtime` when `DATABASE_URL` is in `build_time_env` (the build inlines it).
+5. With variables: `C env-push <name> ~/.config/coolify-ops/secrets/<name>.env` (+ `--buildtime <KEY…>` with
+   the keys of `build_time_env`, except `DATABASE_URL` when step E4 created it). If the result has
+   `buildtime_not_in_file`, those keys were not uploaded: add them with `env-template` and push again. Empty values are never uploaded:
    if `skipped_empty` lists keys, name them and ask the user whether to fill them in (then push again) or go on.
 6. Protected access chosen: `C protect <name> [--user <user>]` (the password is generated and saved in
    `secrets/<name>.access`, mode 600; never print it — tell the user where it is).
@@ -151,7 +175,8 @@ that file (never in the chat). Wait for their «yes».
 
 ### F · Verification
 `V https://<domain> --routes / [routes] --external --server`, adding `--protected` when the app has a user and
-password (its routes must then answer 401). If the certificate is not valid yet, wait (the
+password (its routes must then answer 401) and `--expect <ssr_marker>` when the analysis has one (not checked
+on protected apps: `marker_found` is then null). If the certificate is not valid yet, wait (the
 script already waits up to 2 minutes). If `external_unverified`, say so; it is not a failure.
 
 ### G · Wrap-up
@@ -185,4 +210,4 @@ a new repository, every commit).
 
 ## Known issues
 See `${CLAUDE_SKILL_DIR}/reference/troubleshooting.md` (ports, health check, old Node, SPA routes, public
-Next/Vite variables, certificates, leftovers after deleting) and `${CLAUDE_SKILL_DIR}/reference/coolify-api.md`.
+Next/Vite variables, SSR frameworks, certificates, leftovers after deleting) and `${CLAUDE_SKILL_DIR}/reference/coolify-api.md`.

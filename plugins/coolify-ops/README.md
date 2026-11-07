@@ -28,16 +28,19 @@ push. Everything goes through the Coolify API: no browser automation.
 |---|---|
 | Python with FastAPI | `python-fastapi` (uvicorn) |
 | Python with Flask | `python-flask` (gunicorn) |
-| Node server (Express, Hono, Fastify, NestJS) | `node-server` |
+| Node server (Express, Hono, Fastify, NestJS; Remix, classic or with a `start` script) | `node-server` |
 | Next.js | `nextjs` |
 | SPA: Angular, Vite (React/Vue/Svelte), Create React App | `spa-nginx` |
+| Nuxt, Astro, SvelteKit, Angular SSR, React Router (framework mode) with a Node server | `node-ssr` |
+| The same frameworks built as a static site, and Next.js with `output: 'export'` | `spa-nginx` |
 | Static website | `static-nginx` |
 | Plain PHP | `php-apache` |
 | Any single-service project with its own `Dockerfile` (any framework) | used as is |
 
 Optionally with a private PostgreSQL. **Not** covered yet (the skill stops and explains): monorepos, multi-service
 apps, apps that need MySQL/MariaDB, MongoDB or Redis, and — unless they bring their own `Dockerfile` — Django,
-Laravel/Symfony, Nuxt, Astro and SvelteKit (static or SSR).
+Laravel/Symfony, Nuxt 2, Angular Universal, Remix with Vite and no `start` script, SolidStart, Qwik City, Vike, TanStack Start, Analog, and projects
+built for another platform (e.g. SvelteKit `adapter-auto`, `@astrojs/vercel`): the skill says what to change.
 
 New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scratch.md)
 ([en castellano](../../docs/es/coolify-desde-cero.md)) before the setup below, or let the `provision-server` skill guide you.

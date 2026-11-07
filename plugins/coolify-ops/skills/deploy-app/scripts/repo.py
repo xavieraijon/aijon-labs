@@ -18,7 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from analyze import project_files, scan_secrets  # noqa: E402
+from analyze import analyze, project_files, scan_secrets  # noqa: E402
 
 GITIGNORE = """# Added by coolify-ops (deploy-app)
 node_modules/
@@ -32,6 +32,8 @@ vendor/
 .output/
 .angular/
 .svelte-kit/
+.astro/
+.react-router/
 .env
 .env.*
 !.env.example
@@ -85,12 +87,26 @@ def cmd_init(a) -> dict:
         raise Error(f"Folder {path} does not exist")
     if is_repo(path):
         raise Error("Already a git repository")
-    created = False
+    created, extra = False, []
     if not (path / ".gitignore").exists():
-        (path / ".gitignore").write_text(GITIGNORE)
+        extra = build_output(path)
+        (path / ".gitignore").write_text(GITIGNORE + "".join(f"{d}\n" for d in extra))
         created = True
     git(path, "init", "-b", "main")
-    return {"ok": True, "path": str(path), "branch": "main", "created_gitignore": created}
+    return {"ok": True, "path": str(path), "branch": "main", "created_gitignore": created, "ignored_build_output": extra}
+
+
+def build_output(path: Path) -> list[str]:
+    """Top folder of the build output when the image builds it (a local build may hold inlined build-time values).
+
+    Not for plain static sites (static-nginx copies the folder as is: a «build/» there may hold real files)."""
+    stack = analyze(path).get("stack") or {}
+    build_dir = stack.get("build_dir") or ""
+    top = build_dir.split("/")[0]
+    if stack.get("template") in (None, "static-nginx") or not top or top in {".", ".."}:
+        return []
+    line = f"{top}/"
+    return [] if line in GITIGNORE.splitlines() else [line]
 
 
 def cmd_commit(a) -> dict:

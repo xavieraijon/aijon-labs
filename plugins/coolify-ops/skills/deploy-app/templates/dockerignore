@@ -9,6 +9,11 @@ dist
 build
 .next
 .angular
+.output
+.nuxt
+.svelte-kit
+.astro
+.react-router
 .nx
 coverage
 .env

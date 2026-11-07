@@ -20,7 +20,25 @@ TEMPLATES = HERE.parent / "templates"
 sys.path.insert(0, str(HERE))
 from analyze import analyze  # noqa: E402
 
-NGINX = {"spa-nginx": "nginx-spa.conf", "static-nginx": "nginx-static.conf"}
+# Values read from the user's config files end up in a Dockerfile or nginx.conf: only plain paths and names pass.
+SAFE_PATH = re.compile(r"(?!.*\.\.)[A-Za-z0-9._@/-]+")
+ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+ENV_VALUE = re.compile(r"[A-Za-z0-9._,:/-]*")
+
+
+def nginx_conf(template: str, stack: dict) -> str | None:
+    if template == "static-nginx":
+        return "nginx-static.conf"
+    if template == "spa-nginx":
+        return "nginx-spa.conf" if stack.get("spa", True) else "nginx-static.conf"
+    return None
+
+
+def extra_env(env: dict) -> str:
+    for k, val in env.items():
+        if not ENV_KEY.fullmatch(k) or not ENV_VALUE.fullmatch(str(val)):
+            raise ValueError(f"unsafe environment variable for the Dockerfile: {k}")
+    return "".join(f" {k}={val}" for k, val in env.items())
 
 
 def values(analysis: dict, extra: dict) -> dict:
@@ -28,8 +46,19 @@ def values(analysis: dict, extra: dict) -> dict:
     v = {"PORT": str(s.get("port", "")), "NODE_VERSION": s.get("node_version", "22"),
          "PYTHON_VERSION": s.get("python_version", "3.12"), "MODULE": s.get("module", "main:app"),
          "BUILD_CMD": s.get("build_cmd", "npm run build"), "BUILD_DIR": s.get("build_dir", "dist"),
-         "PHP_VERSION": "8.3"}
+         "PHP_VERSION": "8.3", "SPA_FALLBACK": s.get("spa_fallback", "index.html"),
+         "START_CMD": json.dumps(s.get("start_cmd") or ["npm", "start"]),
+         "EXTRA_ENV": extra_env(s.get("extra_env") or {})}
     v.update(extra)
+    for key in ("BUILD_DIR", "SPA_FALLBACK"):
+        if not SAFE_PATH.fullmatch(v[key]):
+            raise ValueError(f"{key} is not a plain relative path: {v[key]!r}")
+    if not isinstance(json.loads(v["START_CMD"]), list):
+        raise ValueError("START_CMD must be a JSON list")
+    pairs = v["EXTRA_ENV"].split(" ")[1:] if v["EXTRA_ENV"] else []
+    if v["EXTRA_ENV"] and (not v["EXTRA_ENV"].startswith(" ") or not all("=" in x for x in pairs)):
+        raise ValueError("EXTRA_ENV must be « KEY=value KEY=value…» (with a leading space)")
+    extra_env(dict(x.split("=", 1) for x in pairs))  # same checks as values from the analysis
     return v
 
 
@@ -61,11 +90,16 @@ def main() -> None:
         reason = "it already has a Dockerfile" if stack.get("existing_dockerfile") else "no template for this project"
         print(json.dumps({"ok": True, "created": [], "skipped": [], "reason": reason}, ensure_ascii=False))
         return
-    v = values(analysis, dict(x.split("=", 1) for x in a.var))
+    try:
+        v = values(analysis, dict(x.split("=", 1) for x in a.var))
+    except (ValueError, json.JSONDecodeError) as e:
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        sys.exit(1)
 
     plan = [("Dockerfile", TEMPLATES / f"{template}.Dockerfile"), (".dockerignore", TEMPLATES / "dockerignore")]
-    if template in NGINX:
-        plan.append(("nginx.conf", TEMPLATES / NGINX[template]))
+    conf = nginx_conf(template, stack)
+    if conf:
+        plan.append(("nginx.conf", TEMPLATES / conf))
 
     created, skipped = [], []
     try:

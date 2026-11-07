@@ -33,6 +33,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def body(url: str) -> str:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.read(2_000_000).decode(errors="ignore")
+    except (urllib.error.URLError, OSError):
+        return ""
+
+
 def fetch(url: str, follow: bool = True) -> tuple[int, str]:
     opener = urllib.request.build_opener() if follow else urllib.request.build_opener(NoRedirect)
     try:
@@ -122,6 +131,7 @@ def main() -> None:
     p.add_argument("--external", action="store_true"); p.add_argument("--server", action="store_true")
     p.add_argument("--wait", type=int, default=120, help="max seconds waiting for the app to answer")
     p.add_argument("--protected", action="store_true", help="the app has basic auth: routes must answer 401")
+    p.add_argument("--expect", help="text the body of the first route must contain (not checked with --protected)")
     a = p.parse_args()
     res: dict = {}
     if a.url:
@@ -141,6 +151,11 @@ def main() -> None:
         res["ok"] = (res["certificate"]["valid"] and res["http_to_https"]["ok"]
                      and all(answered_ok(c, a.protected) for c in res["routes"].values())
                      and (not a.external or external_ok(res["external"], a.protected)))
+        if a.expect and a.protected:
+            res["marker_found"] = None  # behind basic auth the body is the 401 page: cannot be checked
+        elif a.expect:
+            res["marker_found"] = a.expect in body(url.rstrip("/") + a.routes[0])
+            res["ok"] = res["ok"] and res["marker_found"]
         if a.external and ("error" in res["external"] or not any(res["external"].values())):
             res["external_unverified"] = True
         elif a.external and None in res["external"].values():
