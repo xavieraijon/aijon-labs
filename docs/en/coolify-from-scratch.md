@@ -161,9 +161,13 @@ I can reach it over ssh as user@server, and new projects go in ~/Projects.
 This runs `coolify.py init`, which discovers your server and GitHub App through the API and saves
 `~/.config/coolify-ops/config.json` (outside the repo — never committed).
 
-Then try the example project that ships with this repo:
+Then try the example project that ships with this repo. Coolify deploys from a GitHub repository, so copy it
+into its own folder first (the skill will offer to create a private repo for it):
+```bash
+cp -r examples/hello-fastapi ~/Projects/hello-fastapi
 ```
-Deploy examples/hello-fastapi
+```
+Deploy ~/Projects/hello-fastapi
 ```
 The skill analyzes it, builds and tests it locally with Docker, shows you one summary to confirm, and — after
 your "yes" — creates the app on Coolify with an HTTPS domain and auto-deploy on every push.

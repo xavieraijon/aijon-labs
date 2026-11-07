@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an improvement or a new plugin
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: The situation and what is missing today (e.g. «deploy a Django app», «back up databases»).
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to send a pull request for this

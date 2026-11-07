@@ -224,3 +224,11 @@ def test_every_template_renders_with_default_values():
     v = prepare.values({"stack": {"port": 8000}}, {})
     for p in (SCRIPTS.parent / "templates").glob("*.Dockerfile"):
         assert "{{" not in prepare.render(p.read_text(), v), p.name
+
+
+def test_bundled_example_is_deployable():
+    example = Path(__file__).resolve().parents[3] / "examples" / "hello-fastapi"
+    r = analyze.analyze(example)
+    assert r["deployable"], r["blockers"]
+    assert (r["stack"]["template"], r["stack"]["module"], r["stack"]["port"]) == ("python-fastapi", "main:app", 8000)
+    assert not (example / "Dockerfile").exists()  # the skill must write it

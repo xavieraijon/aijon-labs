@@ -105,7 +105,9 @@ deploy, and set the **Webhook URL** to a **public** address ending in `/webhooks
 Verify: `C init --url … --domain … --ssh … [--reserved <subdomains to keep>] [--projects-dir <folder>]` → `ok`.
 
 ### H · First deployment
-Hand over to `deploy-app`: suggest deploying `examples/hello-fastapi` from this repo (or a project of theirs).
+Hand over to `deploy-app`: suggest the example app of this repo — the user copies it into its own folder
+(`cp -r <repo>/examples/hello-fastapi <projects_dir>/hello-fastapi`, the skill then creates its GitHub repo) —
+or a project of theirs.
 After it works: `python3 -I ${CLAUDE_SKILL_DIR}/../deploy-app/scripts/verify.py --server` for the final health
 picture. Offer to decommission the example app afterwards (through `deploy-app`, which confirms first).
 

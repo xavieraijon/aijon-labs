@@ -18,4 +18,5 @@
    no se saltan nunca.
 4. Material de consulta largo en `reference/` (Claude lo lee solo cuando lo necesita).
 5. Tests en `plugins/<plugin>/tests/`, README del plugin y entrada en `CHANGELOG.md`.
-6. Prueba en local: `/plugin marketplace add ~/aijon-labs` y `/plugin install <plugin>@aijon-labs`.
+6. Prueba en local: `/plugin marketplace add ./aijon-labs` (ruta a tu copia) y
+   `/plugin install <plugin>@aijon-labs`; tras cada cambio, `/reload-plugins`.

@@ -165,9 +165,13 @@ ejemplo.org, puedo entrar por ssh como usuario@servidor, y los proyectos nuevos 
 Esto ejecuta `coolify.py init`, que descubre tu servidor y tu GitHub App por la API y guarda
 `~/.config/coolify-ops/config.json` (fuera del repo; nunca se sube).
 
-Luego prueba con el proyecto de ejemplo que viene en este repo:
+Luego prueba con el proyecto de ejemplo que viene en este repo. Coolify despliega desde un repositorio de
+GitHub, así que primero cópialo a su propia carpeta (la skill te propondrá crearle un repo privado):
+```bash
+cp -r examples/hello-fastapi ~/Projects/hello-fastapi
 ```
-Despliega examples/hello-fastapi
+```
+Despliega ~/Projects/hello-fastapi
 ```
 La skill lo analiza, lo construye y lo prueba en local con Docker, te muestra un solo resumen para confirmar y,
 tras tu «sí», crea la app en Coolify con dominio HTTPS y despliegue automático en cada push.

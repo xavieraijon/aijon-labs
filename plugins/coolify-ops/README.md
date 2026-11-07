@@ -1,5 +1,7 @@
 # coolify-ops
 
+*[Leer en castellano](README.es.md)*
+
 Claude Code skills to run your own [Coolify](https://coolify.io) server: tell Claude «deploy this project» and it
 analyzes it, writes a Dockerfile if missing, builds and tests it on your machine, shows you **one summary** to
 confirm and, after your «yes», publishes it with an HTTPS domain, a database if needed and auto-deploy on every
@@ -37,7 +39,7 @@ Optionally with a private PostgreSQL. **Not** covered yet (the skill stops and e
 apps, Django, Laravel/Symfony, Nuxt/Astro/SvelteKit SSR.
 
 New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scratch.md)
-([en castellano](../../docs/es/coolify-desde-cero.md)) before step 1 below.
+([en castellano](../../docs/es/coolify-desde-cero.md)) before the setup below, or let the `provision-server` skill guide you.
 
 ## Requirements
 
@@ -50,7 +52,7 @@ New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scr
 
 1. **Enable the API** in Coolify: *Settings → Advanced → API access → Enabled*, and set *Allowed IPs* to your
    network (e.g. `192.168.1.0/24`).
-2. **Create a token** in *Keys & Tokens → API tokens* with `read`, `write`, `deploy` and `delete`.
+2. **Create a token** in *Security → API tokens* with `read`, `write`, `deploy` and `delete`.
 3. **Store the token** (it never goes into a repo or the chat). Pick one:
    - macOS Keychain (copy the token first):
      `security add-generic-password -U -a "$USER" -s coolify-api-token -w "$(pbpaste)" && pbcopy < /dev/null`

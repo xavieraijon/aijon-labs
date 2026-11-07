@@ -7,6 +7,6 @@ documentan aquí con su script y las instrucciones para activarlas en `~/.claude
 1. Crea `plugins/<plugin>/` con su `plugin.json` si el mod se puede empaquetar (hooks, órdenes, agentes).
 2. Si necesita ajustes en `settings.json`, ponlos en el README del plugin como fragmento JSON para copiar, nunca los
    apliques desde un script de instalación.
-3. Mismas reglas que el resto: castellano, nada personal, tests y CHANGELOG.
+3. Mismas reglas que el resto (ver [convenciones](convenciones.md)): nada personal, tests y CHANGELOG.
 
 En Claude Code, la skill `plugin-authoring` ayuda a diseñarlos.

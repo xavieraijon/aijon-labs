@@ -20,6 +20,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). C
   the Internet, hardening, install, API, GitHub App), checking every step; never runs `sudo` or handles passwords.
   New script `server.py` (`diagnose`, `dns`, `ports`, `health`).
 - Tutorial «Coolify from scratch» in English and Spanish (`docs/en`, `docs/es`).
+- Example app `examples/hello-fastapi` to try the whole flow.
+- Bilingual repository: `README.md`/`README.es.md`, contributor guides in `docs/en` and `docs/es`, `SECURITY.md`,
+  `CONTRIBUTING.md`, issue and pull request templates.
+- CI on Python 3.10 and 3.13 plus a check that no private IPs or e-mail addresses are committed.
 - Remote ssh commands run through `sh -s`, so they work whatever the login shell of the server user (zsh, fish…).
 
 ## coolify-deploy (old name)
