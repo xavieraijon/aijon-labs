@@ -16,6 +16,8 @@ build
 .react-router
 .nx
 coverage
+db.sqlite3
+staticfiles
 .env
 .env.*
 !.env.example

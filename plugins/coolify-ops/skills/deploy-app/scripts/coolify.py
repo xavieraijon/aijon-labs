@@ -325,7 +325,8 @@ def cmd_create_postgres(a):
 
 def cmd_create_app(a):
     cfg = config()
-    bad = [k for k in getattr(a, "env_domain", None) or [] if not ENV_KEY.fullmatch(k)]
+    bad = [k for k in (getattr(a, "env_domain", None) or []) + (getattr(a, "env_generate", None) or [])
+           if not ENV_KEY.fullmatch(k)]
     if bad:
         raise Error(f"Invalid variable names: {', '.join(bad)}")
     check = cmd_domain_check(argparse.Namespace(host=a.domain))
@@ -351,7 +352,36 @@ def cmd_create_app(a):
     res = {"ok": True, "app_uuid": uuid, "url": f"https://{check['host']}"}
     if getattr(a, "env_domain", None):  # the app exists now: report env failures instead of raising, so the uuid is never lost
         res["env_domain"], res["env_errors"] = _set_domain_envs(uuid, check["host"], a.env_domain)
+    if getattr(a, "env_generate", None):
+        res["env_generated"], errors = _generate_envs(uuid, a.env_generate)
+        res["env_errors"] = res.get("env_errors", []) + errors
     return res
+
+
+def _generate_envs(app_uuid: str, keys: list[str]) -> tuple[dict, list[dict]]:
+    """Set each KEY to a random secret (e.g. DJANGO_SECRET_KEY) unless it already exists: re-running never
+    rotates it. The value goes straight to the API and is never printed or stored locally."""
+    existing = {e.get("key") for e in api("GET", f"/applications/{app_uuid}/envs") or [] if not e.get("is_preview")}
+    done, errors = {}, []
+    for key in dict.fromkeys(keys):
+        if key in existing:
+            done[key] = "kept"
+            continue
+        try:
+            _set_env(app_uuid, key, secrets.token_urlsafe(50), secret=True, buildtime=False)
+            done[key] = "created"
+        except Error as e:
+            errors.append({"key": key, "error": str(e)})
+    return done, errors
+
+
+def cmd_env_generate(a):
+    """Random secret values for KEY… (only for keys the app does not have yet)."""
+    bad = [k for k in a.keys if not ENV_KEY.fullmatch(k)]
+    if bad:
+        raise Error(f"Invalid variable names: {', '.join(bad)}")
+    done, errors = _generate_envs(resolve_app(a.app), a.keys)
+    return {"ok": not errors, "env_generated": done, "env_errors": errors}
 
 
 def _set_domain_envs(app_uuid: str, host: str, keys: list[str]) -> tuple[list[str], list[dict]]:
@@ -739,7 +769,12 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--no-autodeploy", dest="no_autodeploy", action="store_true")
     c.add_argument("--env-domain", dest="env_domain", action="append", metavar="KEY",
                    help="set KEY=<the app's domain> as a runtime variable (repeatable), e.g. NG_ALLOWED_HOSTS")
+    c.add_argument("--env-generate", dest="env_generate", action="append", metavar="KEY",
+                   help="set KEY to a random secret unless it exists (repeatable), e.g. DJANGO_SECRET_KEY")
     c.set_defaults(f=cmd_create_app)
+
+    c = s.add_parser("env-generate", help="set KEY… to random secrets, only if missing (values are never printed)")
+    c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_generate)
 
     c = s.add_parser("env-domain", help="set KEY=<the app's domain> as a runtime variable (e.g. NG_ALLOWED_HOSTS)")
     c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_domain)

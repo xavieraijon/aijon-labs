@@ -13,8 +13,9 @@ is required by `GET /applications/{uuid}/logs` (`routes/api.php`); the scripts n
 | any `<app>` argument | a name missing from `apps.json` is looked up in `GET /applications` (exact `name`) |
 | `domain-check` | `GET /applications` (`fqdn` field) |
 | `create-project` | `GET /projects`, `POST /projects` |
-| `create-app` | `POST /applications/private-github-app` (`build_pack=dockerfile`, `ports_exposes`, `domains`, `limits_*`, `is_auto_deploy_enabled`, `health_check_enabled=false`, `instant_deploy=false`); with `--env-domain KEY` it then sets `KEY=<domain>` as a runtime variable and reports failures in `env_errors` without losing `app_uuid` |
+| `create-app` | `POST /applications/private-github-app` (`build_pack=dockerfile`, `ports_exposes`, `domains`, `limits_*`, `is_auto_deploy_enabled`, `health_check_enabled=false`, `instant_deploy=false`); with `--env-domain KEY` it then sets `KEY=<domain>` as a runtime variable, with `--env-generate KEY` a random secret (as `env-generate`), and reports failures in `env_errors` without losing `app_uuid` |
 | `env-domain <app> KEY…` | `GET /applications/{uuid}` (`fqdn`) then `POST/PATCH /applications/{uuid}/envs` with the domain host |
+| `env-generate <app> KEY…` | `GET /applications/{uuid}/envs`; for each key not present, `POST /applications/{uuid}/envs` with a random value (`is_shown_once`, runtime only). Existing keys are kept, never rotated |
 | `create-postgres` | `POST /databases/postgresql` (`is_public=false`, `instant_deploy=true`; user and password generated locally) |
 | `env-set`, `env-push [--only KEY…] [--buildtime KEY…]`, `env-delete` (and `create-postgres --buildtime` for `DATABASE_URL`) | `GET/POST/PATCH/DELETE /applications/{uuid}/envs` (`is_literal`, `is_buildtime`, `is_runtime`, `is_shown_once`) |
 | `env-template` | none: writes `secrets/<app>.env` locally (empty keys, mode 600) |

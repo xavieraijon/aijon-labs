@@ -28,6 +28,24 @@ All notable changes to the plugins of this marketplace. The format is based on
   Dockerfile, as Coolify does) and `--expect TEXT`; `verify.py --expect TEXT` checks the page body (e.g. that
   Angular rendered it on the server).
 
+- `deploy-app` deploys Django without a Dockerfile of its own: gunicorn, static files with WhiteNoise,
+  migrations on every start and a PostgreSQL database (also for projects that used SQLite). A generated
+  `coolify_settings.py` loads the project's settings and overrides only the production values (secret key,
+  `DEBUG` off, allowed hosts, HTTPS behind the proxy, `DATABASE_URL`, console logging); the project's own files
+  are not changed. Settings that `manage.py` or `wsgi.py` assign instead of `setdefault`, Django < 4.2, `psycopg2`
+  from source and Django with a frontend build are blocked with the change to make.
+- Python projects install their dependencies from `uv.lock`, `poetry.lock`, `requirements.txt` or a plain
+  `pyproject.toml` (in that order), including included requirement files and local path dependencies. The Python
+  version also comes from `.python-version` and Poetry's `python` constraint.
+- The Python templates have a `HEALTHCHECK` (a TCP connect run with Python, no curl needed). Coolify honours it
+  even with its own health check off: it switches traffic only when the new container is healthy and keeps the
+  previous version when it is not (e.g. a failing migration).
+- `coolify.py env-generate <app> KEY…` and `create-app --env-generate KEY` set a random secret (e.g.
+  `DJANGO_SECRET_KEY`) only if the app does not have it yet; the value is never printed. `verify.py --accept-4xx`.
+- The analysis reports `env_vars.managed`: variables the deployment sets itself, never offered in `env-template`.
+- `repo.py init` also ignores `db.sqlite3`, `staticfiles/` and `media/` in new repositories, and the generated
+  `.dockerignore` keeps `db.sqlite3` and `staticfiles` out of the image.
+
 #### Changed
 - `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
   `index.csr.html`, `__spa-fallback.html`) and no HTML page is cached. Static sites that are not single-page apps
@@ -46,6 +64,10 @@ All notable changes to the plugins of this marketplace. The format is based on
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- Python projects without a `requirements.txt` (uv, Poetry, plain `pyproject.toml`) got a Dockerfile that failed
+  at `COPY requirements.txt`.
+- Plain `psycopg` (without `[binary]`) made the app fail at start on the slim image (no libpq): the image now adds
+  `psycopg[binary]`.
 - `prepare.py --overwrite` regenerates a Dockerfile it wrote before (it used to skip any project that already had
   one, so the documented way to change e.g. the Node version did nothing).
 - nginx redirects (e.g. `/about` → `/about/`) are relative, so they keep HTTPS and the host behind the proxy.

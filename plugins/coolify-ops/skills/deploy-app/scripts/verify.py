@@ -86,18 +86,22 @@ def external(url: str) -> dict:
         return {"error": f"check-host unavailable: {e}"}
 
 
-def answered_ok(code, protected: bool = False) -> bool:
-    """2xx/3xx; an app protected with basic auth must answer 401 instead (anything else is a failure)."""
-    return str(code) == "401" if protected else str(code).startswith(("2", "3"))
+def answered_ok(code, protected: bool = False, accept_4xx: bool = False) -> bool:
+    """2xx/3xx; an app protected with basic auth must answer 401 instead (anything else is a failure).
+    With accept_4xx (an app with no page at /) 401/403/404/405 also prove it is up; 400 does not (Django answers
+    400 when its domain is not allowed)."""
+    if protected:
+        return str(code) == "401"
+    return str(code).startswith(("2", "3")) or (accept_4xx and str(code) in ("401", "403", "404", "405"))
 
 
-def external_ok(external: dict, protected: bool = False) -> bool:
+def external_ok(external: dict, protected: bool = False, accept_4xx: bool = False) -> bool:
     """Nodes that gave no answer (None) are ignored; any node that answered must have got a good code.
     If check-host failed altogether, the external check is «unverified», not failed."""
     if "error" in external:
         return True
     codes = [c for c in external.values() if c is not None]
-    return all(answered_ok(c, protected) for c in codes)
+    return all(answered_ok(c, protected, accept_4xx) for c in codes)
 
 
 def server() -> dict:
@@ -132,6 +136,8 @@ def main() -> None:
     p.add_argument("--wait", type=int, default=120, help="max seconds waiting for the app to answer")
     p.add_argument("--protected", action="store_true", help="the app has basic auth: routes must answer 401")
     p.add_argument("--expect", help="text the body of the first route must contain (not checked with --protected)")
+    p.add_argument("--accept-4xx", dest="accept_4xx", action="store_true",
+                   help="any answer below 500 counts (an app with no page at /)")
     a = p.parse_args()
     res: dict = {}
     if a.url:
@@ -149,8 +155,8 @@ def main() -> None:
         if a.external:
             res["external"] = external(url.rstrip("/") + a.routes[0])
         res["ok"] = (res["certificate"]["valid"] and res["http_to_https"]["ok"]
-                     and all(answered_ok(c, a.protected) for c in res["routes"].values())
-                     and (not a.external or external_ok(res["external"], a.protected)))
+                     and all(answered_ok(c, a.protected, a.accept_4xx) for c in res["routes"].values())
+                     and (not a.external or external_ok(res["external"], a.protected, a.accept_4xx)))
         if a.expect and a.protected:
             res["marker_found"] = None  # behind basic auth the body is the 401 page: cannot be checked
         elif a.expect:

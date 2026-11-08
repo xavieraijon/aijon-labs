@@ -15,7 +15,7 @@ through the scripts in `${CLAUDE_SKILL_DIR}/scripts/`, which print JSON:
 | `coolify.py` | Coolify API: check, init, status, projects, apps, databases, env vars, access protection, deploy, wait, logs, rollback, decommission |
 | `repo.py` | Local git: `state`, `init` (with a `.gitignore`), `commit` (refuses if it finds secrets). **It has no push** |
 | `analyze.py` | Read-only project analysis: is it deployable, which template, and why not |
-| `prepare.py` | Writes Dockerfile / .dockerignore / nginx.conf from `templates/` (never overwrites) |
+| `prepare.py` | Writes Dockerfile / .dockerignore / nginx.conf / coolify_settings.py (Django) from `templates/` (never overwrites unless `--overwrite`) |
 | `local_check.py` | Builds and runs the image locally, probes routes, always cleans up |
 | `verify.py` | Checks the published app (HTTPS, redirect, routes, external reachability) and server health |
 
@@ -53,15 +53,17 @@ plugin.
 4. **Never** make a database public or open router ports. Never use a reserved or already used subdomain
    (`C domain-check` verifies it).
 5. **CPU/RAM limits always** (defaults from the config). Coolify's health check stays off unless the image has
-   `curl`/`wget`.
+   `curl`/`wget`. The Python templates bring their own `HEALTHCHECK` (Coolify waits for it and keeps the previous
+   version if the new one never becomes healthy).
 6. **Only touch application code if the user asks.** The skill adds deployment files only.
 7. If the server is above 80 °C or its disk above 90 %, warn and do not build.
 8. **At most 2 automatic retries** per build/start failure, changing deployment files only. Then stop and
    explain using the last log lines.
-9. Scope: **single-service** apps (Python FastAPI/Flask, Node, Next.js, SPA, static, plain PHP; Nuxt, Astro,
-   SvelteKit, Angular SSR and React Router as a static site or a Node server) with optional PostgreSQL, plus any
-   single-service project with **its own `Dockerfile`** (used as is, whatever the framework). Without their own
-   Dockerfile, Django, Laravel/Symfony, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
+9. Scope: **single-service** apps (Python FastAPI/Flask/Django with requirements.txt, uv, Poetry or a plain
+   `pyproject.toml`; Node, Next.js, SPA, static, plain PHP; Nuxt, Astro, SvelteKit, Angular SSR and React Router as
+   a static site or a Node server) with optional PostgreSQL (always for Django), plus any single-service project
+   with **its own `Dockerfile`** (used as is, whatever the framework). Without their own Dockerfile, Django with a
+   frontend build (`package.json`), Pipenv projects, Laravel/Symfony, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
    Cloudflare, SvelteKit `adapter-auto`…), SolidStart, Qwik City, Vike, TanStack Start and Analog are not covered
    yet. Monorepos, multi-service apps and apps that need MySQL/MariaDB, MongoDB or Redis are not covered either.
    In all these cases: **stop and explain** (the analysis reports them as `blockers`, with the change that would
@@ -87,8 +89,8 @@ plugin.
 - Given `owner/repo` not present locally: `gh repo clone owner/repo <projects_dir>/<repo>` (`projects_dir` comes
   from `config.json`; new projects are also created there).
 - `G state <path>`. Not a repository (`is_repo` false): `G init <path>` first — it creates `.gitignore` if missing
-  (dependencies, build caches, `.env*`, and the build output folder listed in `ignored_build_output` when the
-  image builds it) so the analysis below sees the project as it would be pushed. Git is only
+  (dependencies, build caches, `.env*`, `db.sqlite3`, `staticfiles/`, `media/`, and the build output folder listed
+  in `ignored_build_output` when the image builds it) so the analysis below sees the project as it would be pushed. Git is only
   ever used through `repo.py`, never directly.
 - `A <path>` and read: `deployable`, `blockers`, `warnings`, `stack`, `env_vars`, `databases`, `secrets`,
   `has_login_estimate`, `paid_services_estimate`, `git`, `suggested_name`, and when present `build_time_env`.
@@ -98,6 +100,15 @@ plugin.
   submissions will be rejected behind HTTPS; in the summary (step D) show the fix — in `origin_fix.file`, add
   `origin_fix.add` with `{domain}` replaced by `<name>.<base_domain>` — and add it only if the user asks (rule 6;
   then commit it with the deployment files). Pages without forms work either way.
+- **Django** (`stack.framework` = `django`): `prepare.py` also writes `coolify_settings.py`, a deployment file
+  that loads the project's settings and overrides the production values (secret key, `DEBUG` off, allowed hosts,
+  HTTPS proxy, `DATABASE_URL`, static files with WhiteNoise, console logging); the project's own files are not
+  changed. `stack.generated_env` (`DJANGO_SECRET_KEY`) is created on the server by step E3, never by the user;
+  `env_vars.managed` lists the variables the deployment sets itself (never ask for them). `stack.check_routes`
+  are the routes to probe (admin login and one admin CSS file when they exist); `stack.local_env` the test
+  variables for step C. Migrations run on every container start (`stack.migrations`).
+- Python: check `stack.module` (the app object gunicorn/uvicorn loads, e.g. `main:app`). The analysis only looks
+  at the project root, `app/` and `src/`; if the app object lives elsewhere, correct it in step C1.
 - From here on, `<name>` = the name the user gave, else `suggested_name`; `<port>` = `stack.port`;
   `<path>` = the project folder.
 - No GitHub remote yet: the owner is `gh api user -q .login` unless the user names an organisation; the repository
@@ -108,7 +119,8 @@ plugin.
   called by other programs would then need the same user and password.
 
 ### C · Preparation and local check
-1. `P <path>` (use `--var KEY=value` if the analysis got something wrong, e.g. `--var PORT=8080`).
+1. `P <path>` (use `--var KEY=value` if the analysis got something wrong, e.g. `--var PORT=8080` or
+   `--var MODULE=api.main:app`; when the files already exist, add `--overwrite` or nothing is rewritten).
 2. `L <path> --port <port> --routes / [other relevant routes]` (add `--env` with test values only).
    - `build_time_env` present: also `--build-env KEY=<test value>` for each of those keys (the build inlines them
      and fails without them). Test values only, never the real ones.
@@ -116,14 +128,19 @@ plugin.
      400 to any other host).
    - `stack.ssr_marker` present: add `--expect <ssr_marker>`; `marker_found: false` means the page was not
      rendered on the server (a failure, rule 8).
-   If the app needs a database (`databases` not empty), there is none locally: probe only routes that do not use
-   it. A failure caused only by the missing database (connection refused / unknown host in `container_logs`) is
+   - `stack.local_env` present (Django): `--routes / <check_routes>` and `--env` for each of its entries. With a
+     SQLite project it includes a temporary SQLite `DATABASE_URL`, so migrations, static files and the server are
+     all exercised. Without it (the project targets PostgreSQL), a start failure from `migrate` or the database
+     connection counts as «start needs the database» below.
+   Unless `stack.local_env` provides a `DATABASE_URL`, an app that needs a database (`databases` not empty) has
+   none locally: probe only routes that do not use it. A failure caused only by the missing database (connection refused / unknown host in `container_logs`) is
    **not** a build failure: report «build OK, start needs the database» and do not apply rule 8.
-3. On failure: read `build_error` / `container_logs`, fix **only** deployment files and repeat (rule 8).
+3. On failure: read `build_error` / `container_logs`, fix **only** deployment files and repeat (rule 8). To
+   change a value from the analysis, `P <path> --var KEY=value --overwrite`.
 4. If it works, commit. A repository just created by `G init` has no commits yet: commit the whole project,
    deployment files included (`G commit <path> -m "chore: initial commit" --all`; allowed under rule 6, it changes
    no code). An existing repository: only the deployment files,
-   `G commit <path> -m "build: deploy to Coolify (…)" --files Dockerfile .dockerignore [nginx.conf]`.
+   `G commit <path> -m "build: deploy to Coolify (…)" --files Dockerfile .dockerignore [nginx.conf] [coolify_settings.py]`.
    If `G commit` returns `secrets`, stop (rule 3).
 
 ### D · Summary and confirmation (the only question)
@@ -136,14 +153,19 @@ Access:       public | protected with user and password
 Database:     no | PostgreSQL 17 (new, private) | external (DATABASE_URL supplied by you, with the variables)
 Variables:    <names> (values in ~/.config/coolify-ops/secrets/<name>.env; mark build-time ones) | none
               + <keys of stack.runtime_env> = the domain (set automatically)
+              + <keys of stack.generated_env> = random secret (generated on the server, never shown)
+Migrations:   (Django only) applied automatically on every start — with auto-deploy also on every push, without
+              asking; there are no database backups yet
 Resources:    max <cpus> CPU / <memory>
 Auto-deploy:  yes (every push publishes) | no
 Warnings:     <list or «none»>
 Local check:  OK (<seconds> s build, routes <…>)
 ```
-If `build_time_env` lists secret keys, add to «Warnings»: «<keys> are needed at build time: Coolify passes them
+If `stack.warning_sqlite` is present, add to «Warnings»: «the PostgreSQL database starts empty: the admin user
+must be created again (step G)». If `build_time_env` lists secret keys, add to «Warnings»: «<keys> are needed at build time: Coolify passes them
 as build arguments, so their values stay in the image history on the server (not in logs)».
-If variables are needed, `C env-template <name> KEY1 KEY2 …` with the names from `env_vars` (it creates
+If variables are needed, `C env-template <name> KEY1 KEY2 …` with the names from `env_vars` — never those in
+`env_vars.managed` (it creates
 `~/.config/coolify-ops/secrets/<name>.env` with empty keys, mode 600, and never touches existing values). **Leave
 out `DATABASE_URL` when the skill creates the database** (step E4 sets it); include it when the database is
 external. Ask the user to fill in the values in
@@ -157,9 +179,10 @@ that file (never in the chat). Wait for their «yes».
 2. `C create-project <name>` → `project_uuid`.
 3. `C create-app --project <uuid> --repo <owner/repo> --branch <branch> --port <port> --domain <name> --name <name>`
    (+ `--cpus`/`--memory` to override defaults, `--no-autodeploy` if chosen, `--env-domain <KEY>` for each key of
-   `stack.runtime_env`) → `app_uuid`. If `env_errors` is not empty the app **was** created: retry once with
-   `C env-domain <name> <KEY…>`; if it fails again, stop and explain (nothing to undo; the variable can be set
-   later the same way).
+   `stack.runtime_env`, `--env-generate <KEY>` for each key of `stack.generated_env`) → `app_uuid`. If
+   `env_errors` is not empty the app **was** created: retry once the failed keys with `C env-domain <name> <KEY…>`
+   or `C env-generate <name> <KEY…>`; if it fails again, stop and explain (nothing to undo; the variable can be
+   set later the same way).
 4. With PostgreSQL, unless the user said they bring their own database (then `DATABASE_URL` is a variable like
    any other, uploaded in step E5, with `--buildtime` if it is in `build_time_env`):
    `C create-postgres --project <uuid> --name <name> --app <name> --app-uuid <app_uuid>`
@@ -174,17 +197,26 @@ that file (never in the chat). Wait for their «yes».
 7. `C deploy <name>` → `deployment_uuid`; `C wait <deployment_uuid>`.
 8. If `ok` is false: diagnose with `last_lines` (and `C logs <name>`). A clone/checkout error («repository not
    found», «could not read from remote») means the GitHub App has no access to the repository: back to step E1,
-   it is not a build failure. Otherwise fix deployment files, commit, push by the user and retry (rule 8).
+   it is not a build failure. If the new container never became healthy and the deployment log
+   (`C wait <deployment_uuid> --lines 120`; Coolify copies the new container's output there) shows `Applying …`
+   followed by a traceback, a **migration failed**: Coolify kept the previous version running (`C logs <name>`
+   shows that old container, not the failed one). Report it with the error lines; it is a problem in the project's
+   migrations, not in the deployment files (no rule-8 retries).
+   Otherwise fix deployment files, commit, push by the user and retry (rule 8).
 
 ### F · Verification
 `V https://<domain> --routes / [routes] --external --server`, adding `--protected` when the app has a user and
 password (its routes must then answer 401) and `--expect <ssr_marker>` when the analysis has one (not checked
-on protected apps: `marker_found` is then null). If the certificate is not valid yet, wait (the
+on protected apps: `marker_found` is then null). Django: `--routes <check_routes>` (without `/`). Any app whose
+`/` answered 404 in the local check (a Django project with no home page, an API): use a route that answered 2xx
+there (FastAPI serves `/docs`) or `--routes / --accept-4xx` (401/403/404/405 then prove it is up; 400 does not). If the certificate is not valid yet, wait (the
 script already waits up to 2 minutes). If `external_unverified`, say so; it is not a failure.
 
 ### G · Wrap-up
 Summarize in a few lines: URL, what was created (project, app, database), verification result and how to update
-(«push to <branch> and it deploys by itself»). The local registry (`apps.json`) is updated by the scripts.
+(«push to <branch> and it deploys by itself»). Django: the new database is empty (data in `db.sqlite3` was not
+copied); to use the admin, create a user with `python manage.py createsuperuser` in the app's *Terminal* tab in
+Coolify (it asks for the password there, never in the chat). The local registry (`apps.json`) is updated by the scripts.
 
 ---
 
@@ -197,7 +229,7 @@ Summarize in a few lines: URL, what was created (project, app, database), verifi
 | `logs <app>` | `C logs <app>` and `C last-deployment <app>`; summarize errors |
 | `update <app>` | `G state <path>`; local changes → `G commit <path> -m "<message>" --all` → push by the user → `C last-deployment <app>` until the new commit shows up → `C wait …` → `V …`. Without auto-deploy: `C deploy <app>` |
 | `env <app>` | `C env-list <app>` (names only). To add or change values: `C env-template <app> <KEY…>` if new keys → the user edits `secrets/<app>.env` → `C env-push <app> <file> --only <KEY…>` with **only** the keys added or changed (pushing the whole file would overwrite values changed in the panel since) → `C deploy <app>` → `C wait <deployment_uuid>` → `V https://<domain>`. To delete one: confirm with the user → `C env-delete <app> <KEY> --confirmed`. Do not use `env-set` with a value on the command line |
-| `rollback <app>` | `C rollback <app>` lists images (read-only, no question): `current` is the running tag, `images[]` have `tag`, `created_at`, `is_current`; «the previous version» = the newest image that is not current. No image besides the current one → say a rollback is not possible and offer an `update` with a `git revert` made by the user. Otherwise show them, **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` → `C wait <deployment_uuid>` → `V https://<domain>` (`--protected` if it has a user and password). Domain and auto-deploy come from `C status` (`domains`, `autodeploy`) when the app is not in `apps.json`. If auto-deploy is on, warn that the next push replaces the rollback |
+| `rollback <app>` | `C rollback <app>` lists images (read-only, no question): `current` is the running tag, `images[]` have `tag`, `created_at`, `is_current`; «the previous version» = the newest image that is not current. No image besides the current one → say a rollback is not possible and offer an `update` with a `git revert` made by the user. Otherwise show them, **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` → `C wait <deployment_uuid>` → `V https://<domain>` (`--protected` if it has a user and password). Domain and auto-deploy come from `C status` (`domains`, `autodeploy`) when the app is not in `apps.json`. If auto-deploy is on, warn that the next push replaces the rollback. Django: a rollback restores the code, not the database: migrations already applied stay |
 | `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. If the database or project is not in `apps.json`, the script refuses before deleting anything: tell the user and offer to delete only the app. The script watches the server until Coolify's cleanup is done before removing the project; if `deleted.warning` appears, the project was kept: tell the user. It also deletes the app's local `secrets/<app>.env` and `.access` (listed in `deleted.local_files`) |
 
 ---

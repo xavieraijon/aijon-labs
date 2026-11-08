@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the deployment files (Dockerfile, .dockerignore, nginx.conf) from the templates.
+"""Generate the deployment files (Dockerfile, .dockerignore, nginx.conf, coolify_settings.py) from the templates.
 
 Never overwrites an existing file unless --overwrite is passed. Never touches the application code.
 
@@ -19,6 +19,16 @@ HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE.parent / "templates"
 sys.path.insert(0, str(HERE))
 from analyze import analyze  # noqa: E402
+from pystack import (  # noqa: E402
+    COLLECTSTATIC,
+    DEPS_FILES,
+    INSTALLS,
+    MODULE_PATH,
+    PACKAGE,
+    POETRY_SETUP,
+    UV_IMAGE,
+    WSGI_MODULE,
+)
 
 # Values read from the user's config files end up in a Dockerfile or nginx.conf: only plain paths and names pass.
 SAFE_PATH = re.compile(r"(?!.*\.\.)[A-Za-z0-9._@/-]+")
@@ -49,7 +59,16 @@ def values(analysis: dict, extra: dict) -> dict:
          "PHP_VERSION": "8.3", "SPA_FALLBACK": s.get("spa_fallback", "index.html"),
          "START_CMD": json.dumps(s.get("start_cmd") or ["npm", "start"]),
          "EXTRA_ENV": extra_env(s.get("extra_env") or {})}
+    django = s.get("framework") == "django"
+    v.update({"DEPS_FILES": s.get("deps_files", DEPS_FILES["pip"]), "INSTALL": s.get("install", INSTALLS["pip"]),
+              "POETRY_SETUP": s.get("poetry_setup", ""), "UV_IMAGE": UV_IMAGE,
+              "EXTRA_PACKAGES": " ".join(f'"{x}"' for x in s.get("extra_packages") or ["gunicorn"]),
+              "COLLECTSTATIC": COLLECTSTATIC if s.get("collectstatic", django) else "",
+              "SETTINGS_MODULE": s.get("settings_module", "app.settings")})
+    if django:
+        v["MODULE"] = s.get("module", "app.wsgi:application")
     v.update(extra)
+    python_checks(v)
     for key in ("BUILD_DIR", "SPA_FALLBACK"):
         if not SAFE_PATH.fullmatch(v[key]):
             raise ValueError(f"{key} is not a plain relative path: {v[key]!r}")
@@ -60,6 +79,27 @@ def values(analysis: dict, extra: dict) -> dict:
         raise ValueError("EXTRA_ENV must be « KEY=value KEY=value…» (with a leading space)")
     extra_env(dict(x.split("=", 1) for x in pairs))  # same checks as values from the analysis
     return v
+
+
+def python_checks(v: dict) -> None:
+    """Values that reach a Dockerfile RUN/CMD line: only fixed commands, plain file names and Python identifiers."""
+    if not re.fullmatch(r"\d{0,5}", v["PORT"]):
+        raise ValueError(f"PORT must be a number: {v['PORT']!r}")
+    if not re.fullmatch(r"3\.\d+", v["PYTHON_VERSION"]):
+        raise ValueError(f"PYTHON_VERSION must look like 3.12: {v['PYTHON_VERSION']!r}")
+    if v["INSTALL"] not in INSTALLS.values():
+        raise ValueError("INSTALL must be one of the fixed install commands")
+    if v["DEPS_FILES"] != "." and v["DEPS_FILES"] not in DEPS_FILES.values():
+        raise ValueError("DEPS_FILES must be one of the fixed dependency files or «.»")
+    if v["POETRY_SETUP"] not in ("", POETRY_SETUP) or v["COLLECTSTATIC"] not in ("", COLLECTSTATIC):
+        raise ValueError("POETRY_SETUP and COLLECTSTATIC cannot be overridden")
+    packages = re.findall(r'"([^"]*)"', v["EXTRA_PACKAGES"])
+    if not packages or not all(PACKAGE.fullmatch(x) for x in packages) or v["EXTRA_PACKAGES"] != " ".join(f'"{x}"' for x in packages):
+        raise ValueError("EXTRA_PACKAGES must be quoted package names, e.g. \"gunicorn\" \"psycopg[binary]\"")
+    if not (WSGI_MODULE.fullmatch(v["MODULE"]) or MODULE_PATH.fullmatch(v["MODULE"])):
+        raise ValueError(f"MODULE is not a Python module path: {v['MODULE']!r}")
+    if not MODULE_PATH.fullmatch(v["SETTINGS_MODULE"]):
+        raise ValueError(f"SETTINGS_MODULE is not a Python module path: {v['SETTINGS_MODULE']!r}")
 
 
 def render(text: str, v: dict) -> str:
@@ -100,6 +140,8 @@ def main() -> None:
     conf = nginx_conf(template, stack)
     if conf:
         plan.append(("nginx.conf", TEMPLATES / conf))
+    if template == "python-django":
+        plan.append(("coolify_settings.py", TEMPLATES / "django-settings.py.tmpl"))
 
     created, skipped = [], []
     try:

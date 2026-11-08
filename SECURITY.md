@@ -21,6 +21,10 @@ issue worth reporting:
 - **Nothing personal in the repository.** Each user's IPs, domains, uuids and secrets live in
   `~/.config/<plugin>/`, never in the repo.
 - **Irreversible actions always ask** (delete, rollback, force push), even inside an otherwise automatic flow.
+  One stated exception: a Django app deployed by `deploy-app` applies its database migrations on every start, so
+  with auto-deploy every push runs new migrations without asking (the deployment summary says so before the only
+  confirmation). A migration that drops a column loses that data, a rollback does not undo it, and the skill does
+  not make database backups yet.
 - **Publishing code is done by the user.** The skills never run `git push` or create repositories with a push.
 - **No sudo, no passwords on servers.** `provision-server` only runs read-only commands over ssh with key
   authentication and never accepts an unknown host key on your behalf.

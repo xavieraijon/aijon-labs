@@ -26,6 +26,9 @@ node_modules/
 venv/
 __pycache__/
 *.pyc
+db.sqlite3
+staticfiles/
+media/
 vendor/
 .next/
 .nuxt/

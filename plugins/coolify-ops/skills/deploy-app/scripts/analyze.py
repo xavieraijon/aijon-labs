@@ -17,6 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pystack import analyze_python, is_django  # noqa: E402
+
 IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".angular", ".output",
                 ".nuxt", ".svelte-kit", ".astro", ".react-router",
                 ".nx", "vendor", ".cache", "coverage", ".turbo", ".pytest_cache", ".ruff_cache"}
@@ -471,32 +474,6 @@ def analyze_node(root: Path) -> dict:
     return r
 
 
-def analyze_python(root: Path, files: list[Path]) -> dict:
-    reqs = (read(root / "requirements.txt") + read(root / "pyproject.toml")).lower()
-    r: dict = {"language": "python"}
-    version = re.search(r"python_requires\s*=\s*['\"][^0-9]*(3\.\d+)|requires-python\s*=\s*['\"][^0-9]*(3\.\d+)",
-                        read(root / "pyproject.toml") + read(root / "setup.py"))
-    r["python_version"] = next((g for g in (version.groups() if version else ()) if g), "3.12")
-    if not (root / "requirements.txt").exists():
-        r["warning_requirements"] = "no requirements.txt (the template needs it; adapt it for pyproject-only projects)"
-    module = None
-    for f in files:
-        if f.suffix == ".py" and (f.parent == root or f.parent.name in {"app", "src"}):
-            m = re.search(r"^(\w+)\s*=\s*(FastAPI|Flask)\(", read(f), re.M)
-            if m:
-                module = ".".join(f.relative_to(root).with_suffix("").parts) + ":" + m.group(1)
-                break
-    if "fastapi" in reqs:
-        r.update(framework="fastapi", template="python-fastapi", port=8000, module=module or "main:app")
-    elif "flask" in reqs:
-        r.update(framework="flask", template="python-flask", port=8000, module=module or "app:app")
-    elif "django" in reqs:
-        r.update(framework="django", template=None, warning_framework="Django: no template yet")
-    else:
-        r.update(framework="python", template=None, warning_framework="unrecognized web framework")
-    return r
-
-
 def analyze(root: Path) -> dict:
     root = root.resolve()
     if not root.is_dir():
@@ -528,9 +505,21 @@ def analyze(root: Path) -> dict:
     if monorepo:
         res["monorepo"] = monorepo
         blockers.append("monorepo or several services (" + "; ".join(monorepo) + "): not supported yet")
-    if (root / "package.json").exists():
+    if is_django(root):  # wins over a package.json (Tailwind, django-vite…)
+        res["stack"] = analyze_python(root, files)
+        pkg_scripts = {}
+        try:
+            pkg_scripts = json.loads(read(root / "package.json") or "{}").get("scripts") or {}
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if pkg_scripts.get("build"):
+            res["stack"].update(template=None, warning_framework=(
+                "Django with a frontend build (package.json) is not supported yet: add your own Dockerfile"))
+        elif (root / "package.json").exists():
+            warnings.append("package.json is ignored: the image only installs the Python dependencies")
+    elif (root / "package.json").exists():
         res["stack"] = analyze_node(root)
-    elif (root / "requirements.txt").exists() or (root / "pyproject.toml").exists():
+    elif (root / "requirements.txt").exists() or (root / "pyproject.toml").exists() or (root / "Pipfile").exists():
         res["stack"] = analyze_python(root, files)
     elif (root / "composer.json").exists() or any(f.suffix == ".php" for f in files):
         composer = read(root / "composer.json")
@@ -564,6 +553,11 @@ def analyze(root: Path) -> dict:
 
     # --- variables, databases, login, paid services
     res["env_vars"] = env_vars_used(root, files)
+    managed = set(stack.get("managed_env") or [])
+    if managed:  # set by the deployment itself (generated, from the domain, the database): never asked from the user
+        res["env_vars"]["in_code"] = [k for k in res["env_vars"]["in_code"] if k not in managed]
+        res["env_vars"]["example"] = {k: v for k, v in res["env_vars"]["example"].items() if k not in managed}
+        res["env_vars"]["managed"] = sorted(managed)
     if res["env_vars"]["build_time"]:
         res["build_time_env"] = res["env_vars"]["build_time"]
         warnings.append("variables imported from $env/static are needed at build time ("
@@ -575,7 +569,9 @@ def analyze(root: Path) -> dict:
     if "DATABASE_URL" in names or any(x in manifests for x in ("psycopg", "asyncpg", '"pg"', "postgres",
                                                                 "sqlalchemy", "prisma")):
         dbs.append("postgresql")
-    if any(x in manifests for x in ("mysql", "mariadb")):
+    if stack.get("db_engine") in ("postgresql", "sqlite") and "postgresql" not in dbs:
+        dbs.append("postgresql")  # Django: SQLite would lose its data on every deploy
+    if any(x in manifests for x in ("mysql", "mariadb")) or stack.get("db_engine") == "mysql":
         dbs.append("mysql")
     if any(x in manifests for x in ("mongoose", "mongodb", "pymongo")):
         dbs.append("mongodb")
