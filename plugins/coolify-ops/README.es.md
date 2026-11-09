@@ -31,6 +31,7 @@ todo en castellano: Claude te responde en tu idioma.
 | Python con FastAPI | `python-fastapi` (uvicorn) |
 | Python con Flask | `python-flask` (gunicorn) |
 | Django (ajustes en `coolify_settings.py`, estáticos con WhiteNoise, migraciones al arrancar, PostgreSQL) | `python-django` (gunicorn) |
+| Laravel 11+ (Apache, Composer, frontend Vite compilado en la imagen, migraciones al arrancar, PostgreSQL) | `php-laravel` / `php-laravel-api` |
 | Servidor Node (Express, Hono, Fastify, NestJS; Remix, clásico o con script `start`) | `node-server` |
 | Next.js | `nextjs` |
 | SPA: Angular, Vite (React/Vue/Svelte), Create React App | `spa-nginx` |
@@ -41,9 +42,9 @@ todo en castellano: Claude te responde en tu idioma.
 | Cualquier proyecto de un solo servicio con su propio `Dockerfile` (de cualquier framework) | se usa tal cual |
 
 Las dependencias de Python se instalan desde `requirements.txt`, `uv.lock`, `poetry.lock` o un `pyproject.toml`
-sencillo. Con PostgreSQL privado opcional (en Django se crea siempre). **Todavía no** admite (la skill para y lo explica): monorepos, apps de varios
+sencillo. Con PostgreSQL privado opcional (en Django y Laravel se crea siempre). **Todavía no** admite (la skill para y lo explica): monorepos, apps de varios
 servicios, apps que necesitan MySQL/MariaDB, MongoDB o Redis y, salvo que traigan su propio `Dockerfile`, Django
-con build de frontend (`package.json`), proyectos con Pipenv, Laravel/Symfony, Nuxt 2, Angular Universal, Remix con Vite sin script `start`, SolidStart, Qwik City, Vike, TanStack Start, Analog y los proyectos
+con build de frontend (`package.json`), proyectos con Pipenv, Symfony, Laravel 10 o anterior (o con la estructura anterior a la 11, con Laravel Mix o con repositorios Composer privados), Nuxt 2, Angular Universal, Remix con Vite sin script `start`, SolidStart, Qwik City, Vike, TanStack Start, Analog y los proyectos
 preparados para otra plataforma (p. ej. SvelteKit con `adapter-auto` o `@astrojs/vercel`): la skill dice qué cambiar.
 
 ¿Nuevo en Coolify? Empieza por [Coolify desde cero](../../docs/es/coolify-desde-cero.md) antes de la

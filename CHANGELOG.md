@@ -46,6 +46,22 @@ All notable changes to the plugins of this marketplace. The format is based on
 - `repo.py init` also ignores `db.sqlite3`, `staticfiles/` and `media/` in new repositories, and the generated
   `.dockerignore` keeps `db.sqlite3` and `staticfiles` out of the image.
 
+- `deploy-app` deploys Laravel 11+ without a Dockerfile of its own (new `php-laravel` and `php-laravel-api`
+  templates): Apache serving `public/` as a non-root user, Composer, PHP extensions from `composer.json` and
+  `composer.lock`, the Vite front end built where PHP is available (Wayfinder starter kits), migrations and
+  `php artisan optimize` on every start, logs to stderr, a `HEALTHCHECK`, and a PostgreSQL database (`DB_URL`).
+  A generated `config/trustedproxy.php` makes Laravel trust Coolify's proxy only inside the image, so URLs and
+  assets use `https://`. Only the variables the project added are asked; skeleton keys with a different value in
+  `.env.example` are listed in `env_vars.changed_defaults` and the skill asks whether production needs them. Laravel 10 or older, the pre-11 structure, Laravel Mix, private Composer
+  repositories and Redis are blocked with the change to make; queue workers, the scheduler, Reverb and Inertia
+  SSR are reported as not deployed.
+- `create-app --env-url KEY` and `env-url <app> KEY…` set `KEY=https://<the app's domain>` (Laravel `APP_URL`);
+  `env-generate KEY:laravel` creates a Laravel `APP_KEY`; `create-postgres --env-key KEY` names the variable that
+  receives the database URL.
+- `auth.json` (Composer credentials) is reported as a sensitive file.
+- `deploy-app` has a mode for «my change does not show»: it checks whether the change was pushed and, when the
+  last deployment failed, reads that deployment's log (a failed migration keeps the previous version running).
+
 #### Changed
 - `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
   `index.csr.html`, `__spa-fallback.html`) and no HTML page is cached. Static sites that are not single-page apps
@@ -64,6 +80,10 @@ All notable changes to the plugins of this marketplace. The format is based on
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- Laravel projects with a `package.json` (nearly all) were treated as a Vite single-page app and got an nginx
+  image that could not run them.
+- A compose file's `networks:` and `volumes:` keys were counted as services, so a project with one service and a
+  named volume was reported as multi-service. Services indented with 4 spaces (Laravel Sail) are now recognised.
 - Python projects without a `requirements.txt` (uv, Poetry, plain `pyproject.toml`) got a Dockerfile that failed
   at `COPY requirements.txt`.
 - Plain `psycopg` (without `[binary]`) made the app fail at start on the slim image (no libpq): the image now adds

@@ -22,8 +22,8 @@ un problema de seguridad y merece un aviso:
 - **Nada personal en el repositorio.** Las IPs, dominios, uuids y secretos de cada usuario viven en
   `~/.config/<plugin>/`, nunca en el repo.
 - **Las acciones irreversibles preguntan siempre** (borrar, rollback, force push), aunque el resto del flujo sea
-  automático. Una excepción declarada: una app Django desplegada con `deploy-app` aplica sus migraciones de base
-  de datos en cada arranque, así que con auto-deploy cada push ejecuta las migraciones nuevas sin preguntar (el
+  automático. Una excepción declarada: una app Django o Laravel desplegada con `deploy-app` aplica sus
+  migraciones de base de datos en cada arranque, así que con auto-deploy cada push ejecuta las migraciones nuevas sin preguntar (el
   resumen del despliegue lo dice antes de la única confirmación). Una migración que borra una columna pierde esos
   datos, un rollback no la deshace y la skill todavía no hace copias de seguridad de la base de datos.
 - **Publicar código lo hace el usuario.** Las skills nunca ejecutan `git push` ni crean repositorios con push.

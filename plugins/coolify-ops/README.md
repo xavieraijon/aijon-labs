@@ -29,6 +29,7 @@ push. Everything goes through the Coolify API: no browser automation.
 | Python with FastAPI | `python-fastapi` (uvicorn) |
 | Python with Flask | `python-flask` (gunicorn) |
 | Django (settings in `coolify_settings.py`, static files with WhiteNoise, migrations on start, PostgreSQL) | `python-django` (gunicorn) |
+| Laravel 11+ (Apache, Composer, Vite front end built in the image, migrations on start, PostgreSQL) | `php-laravel` / `php-laravel-api` |
 | Node server (Express, Hono, Fastify, NestJS; Remix, classic or with a `start` script) | `node-server` |
 | Next.js | `nextjs` |
 | SPA: Angular, Vite (React/Vue/Svelte), Create React App | `spa-nginx` |
@@ -39,9 +40,9 @@ push. Everything goes through the Coolify API: no browser automation.
 | Any single-service project with its own `Dockerfile` (any framework) | used as is |
 
 Python dependencies are installed from `requirements.txt`, `uv.lock`, `poetry.lock` or a plain `pyproject.toml`.
-Optionally with a private PostgreSQL (always created for Django). **Not** covered yet (the skill stops and explains): monorepos, multi-service
+Optionally with a private PostgreSQL (always created for Django and Laravel). **Not** covered yet (the skill stops and explains): monorepos, multi-service
 apps, apps that need MySQL/MariaDB, MongoDB or Redis, and — unless they bring their own `Dockerfile` — Django
-with a frontend build (`package.json`), Pipenv projects, Laravel/Symfony, Nuxt 2, Angular Universal, Remix with Vite and no `start` script, SolidStart, Qwik City, Vike, TanStack Start, Analog, and projects
+with a frontend build (`package.json`), Pipenv projects, Symfony, Laravel 10 or older (or with the pre-11 structure, Laravel Mix or private Composer repositories), Nuxt 2, Angular Universal, Remix with Vite and no `start` script, SolidStart, Qwik City, Vike, TanStack Start, Analog, and projects
 built for another platform (e.g. SvelteKit `adapter-auto`, `@astrojs/vercel`): the skill says what to change.
 
 New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scratch.md)

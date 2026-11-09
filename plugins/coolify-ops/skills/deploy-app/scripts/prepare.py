@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate the deployment files (Dockerfile, .dockerignore, nginx.conf, coolify_settings.py) from the templates.
+"""Generate the deployment files (Dockerfile, .dockerignore, nginx.conf, coolify_settings.py,
+config/trustedproxy.php) from the templates.
 
 Never overwrites an existing file unless --overwrite is passed. Never touches the application code.
 
@@ -19,6 +20,7 @@ HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE.parent / "templates"
 sys.path.insert(0, str(HERE))
 from analyze import analyze  # noqa: E402
+from phpstack import COMPOSER_COPY, COMPOSER_VERSION, EXT_INSTALLER, EXTENSION  # noqa: E402
 from pystack import (  # noqa: E402
     COLLECTSTATIC,
     DEPS_FILES,
@@ -56,7 +58,7 @@ def values(analysis: dict, extra: dict) -> dict:
     v = {"PORT": str(s.get("port", "")), "NODE_VERSION": s.get("node_version", "22"),
          "PYTHON_VERSION": s.get("python_version", "3.12"), "MODULE": s.get("module", "main:app"),
          "BUILD_CMD": s.get("build_cmd", "npm run build"), "BUILD_DIR": s.get("build_dir", "dist"),
-         "PHP_VERSION": "8.3", "SPA_FALLBACK": s.get("spa_fallback", "index.html"),
+         "PHP_VERSION": s.get("php_version", "8.3"), "SPA_FALLBACK": s.get("spa_fallback", "index.html"),
          "START_CMD": json.dumps(s.get("start_cmd") or ["npm", "start"]),
          "EXTRA_ENV": extra_env(s.get("extra_env") or {})}
     django = s.get("framework") == "django"
@@ -67,8 +69,12 @@ def values(analysis: dict, extra: dict) -> dict:
               "SETTINGS_MODULE": s.get("settings_module", "app.settings")})
     if django:
         v["MODULE"] = s.get("module", "app.wsgi:application")
+    v.update({"EXT_INSTALLER": EXT_INSTALLER, "COMPOSER_VERSION": COMPOSER_VERSION,
+              "PHP_EXTENSIONS": s.get("php_extensions", "pdo_pgsql opcache"),
+              "COMPOSER_COPY": COMPOSER_COPY[s.get("composer_copy", "manifests")]})
     v.update(extra)
     python_checks(v)
+    php_checks(v)
     for key in ("BUILD_DIR", "SPA_FALLBACK"):
         if not SAFE_PATH.fullmatch(v[key]):
             raise ValueError(f"{key} is not a plain relative path: {v[key]!r}")
@@ -100,6 +106,21 @@ def python_checks(v: dict) -> None:
         raise ValueError(f"MODULE is not a Python module path: {v['MODULE']!r}")
     if not MODULE_PATH.fullmatch(v["SETTINGS_MODULE"]):
         raise ValueError(f"SETTINGS_MODULE is not a Python module path: {v['SETTINGS_MODULE']!r}")
+
+
+def php_checks(v: dict) -> None:
+    """PHP/Laravel values that reach a Dockerfile: version and extension names by pattern, the rest fixed."""
+    if not re.fullmatch(r"8\.\d+", v["PHP_VERSION"]):
+        raise ValueError(f"PHP_VERSION must look like 8.4: {v['PHP_VERSION']!r}")
+    if not re.fullmatch(r"\d{1,3}", v["NODE_VERSION"]):
+        raise ValueError(f"NODE_VERSION must be a major version number: {v['NODE_VERSION']!r}")
+    exts = v["PHP_EXTENSIONS"].split(" ")
+    if not all(EXTENSION.fullmatch(x) for x in exts):
+        raise ValueError(f"PHP_EXTENSIONS must be extension names separated by spaces: {v['PHP_EXTENSIONS']!r}")
+    if v["COMPOSER_COPY"] not in COMPOSER_COPY.values():
+        raise ValueError("COMPOSER_COPY must be one of the fixed values")
+    if v["EXT_INSTALLER"] != EXT_INSTALLER or v["COMPOSER_VERSION"] != COMPOSER_VERSION:
+        raise ValueError("EXT_INSTALLER and COMPOSER_VERSION cannot be overridden")
 
 
 def render(text: str, v: dict) -> str:
@@ -136,12 +157,16 @@ def main() -> None:
         print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
         sys.exit(1)
 
-    plan = [("Dockerfile", TEMPLATES / f"{template}.Dockerfile"), (".dockerignore", TEMPLATES / "dockerignore")]
+    laravel = template.startswith("php-laravel")
+    plan = [("Dockerfile", TEMPLATES / f"{template}.Dockerfile"),
+            (".dockerignore", TEMPLATES / ("dockerignore-laravel" if laravel else "dockerignore"))]
     conf = nginx_conf(template, stack)
     if conf:
         plan.append(("nginx.conf", TEMPLATES / conf))
     if template == "python-django":
         plan.append(("coolify_settings.py", TEMPLATES / "django-settings.py.tmpl"))
+    if laravel and stack.get("trust_proxies", "generated") == "generated":
+        plan.append(("config/trustedproxy.php", TEMPLATES / "laravel-trustedproxy.php.tmpl"))
 
     created, skipped = [], []
     try:

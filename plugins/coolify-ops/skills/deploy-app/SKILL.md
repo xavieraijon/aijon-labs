@@ -53,17 +53,19 @@ plugin.
 4. **Never** make a database public or open router ports. Never use a reserved or already used subdomain
    (`C domain-check` verifies it).
 5. **CPU/RAM limits always** (defaults from the config). Coolify's health check stays off unless the image has
-   `curl`/`wget`. The Python templates bring their own `HEALTHCHECK` (Coolify waits for it and keeps the previous
+   `curl`/`wget`. The Python and Laravel templates bring their own `HEALTHCHECK` (Coolify waits for it and keeps the previous
    version if the new one never becomes healthy).
 6. **Only touch application code if the user asks.** The skill adds deployment files only.
 7. If the server is above 80 °C or its disk above 90 %, warn and do not build.
 8. **At most 2 automatic retries** per build/start failure, changing deployment files only. Then stop and
    explain using the last log lines.
 9. Scope: **single-service** apps (Python FastAPI/Flask/Django with requirements.txt, uv, Poetry or a plain
-   `pyproject.toml`; Node, Next.js, SPA, static, plain PHP; Nuxt, Astro, SvelteKit, Angular SSR and React Router as
-   a static site or a Node server) with optional PostgreSQL (always for Django), plus any single-service project
+   `pyproject.toml`; Node, Next.js, SPA, static, plain PHP; Laravel 11+ with or without a Vite front end; Nuxt,
+   Astro, SvelteKit, Angular SSR and React Router as a static site or a Node server) with optional PostgreSQL
+   (always for Django and Laravel), plus any single-service project
    with **its own `Dockerfile`** (used as is, whatever the framework). Without their own Dockerfile, Django with a
-   frontend build (`package.json`), Pipenv projects, Laravel/Symfony, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
+   frontend build (`package.json`), Pipenv projects, Symfony, Laravel 10 or older (or with the pre-11 structure),
+   Laravel Mix, private Composer repositories, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
    Cloudflare, SvelteKit `adapter-auto`…), SolidStart, Qwik City, Vike, TanStack Start and Analog are not covered
    yet. Monorepos, multi-service apps and apps that need MySQL/MariaDB, MongoDB or Redis are not covered either.
    In all these cases: **stop and explain** (the analysis reports them as `blockers`, with the change that would
@@ -107,6 +109,23 @@ plugin.
   `env_vars.managed` lists the variables the deployment sets itself (never ask for them). `stack.check_routes`
   are the routes to probe (admin login and one admin CSS file when they exist); `stack.local_env` the test
   variables for step C. Migrations run on every container start (`stack.migrations`).
+- **Laravel** (`stack.framework` = `laravel`): PHP with Apache serving `public/`, Composer, the Vite front end
+  built in the image (`stack.frontend`; template `php-laravel`, or `php-laravel-api` without a build script),
+  PostgreSQL always (`DB_URL`). With `stack.trust_proxies` = `generated`, `prepare.py` also writes
+  `config/trustedproxy.php`, a deployment file that makes Laravel trust Coolify's proxy only inside the image
+  (otherwise URLs and assets would use `http://` behind HTTPS); `project` means the project configures it: treat
+  it like `origin_fix` — in step D show the warning and the fix (`->trustProxies(at: '*')` inside `withMiddleware`
+  in `bootstrap/app.php`, replacing the project's own `trustProxies` call) and change it only if the user asks.
+  A MySQL/MariaDB `.env.example` or a Sail `compose.yaml` (mysql, redis…) is **not** a rule-9 stop for Laravel:
+  only what the analysis lists in `blockers` counts; the app runs on PostgreSQL and the summary says «your local
+  database is MySQL; production uses PostgreSQL» (MySQL-only SQL in migrations would fail there). `stack.generated_env` (`APP_KEY:laravel`) and `stack.url_env` (`APP_URL`) are set on the
+  server by step E3, `stack.db_env_key` (`DB_URL`) by step E4; never ask for them. `env_vars` keeps only the
+  variables the project added: the skeleton's ones have defaults. `env_vars.changed_defaults` names the skeleton
+  keys whose `.env.example` value differs (e.g. `MAIL_MAILER`): in step D name them and ask whether production
+  needs its own values for them (the `config/*.php` defaults apply otherwise, e.g. mail goes to the log); values
+  from a local setup (Sail's `mailpit`, `redis`, `mysql` hosts) are not production values. If the user wants
+  them, add them to `env-template` — for mail, all the `MAIL_*` keys together. Queue workers, the scheduler, Reverb and Inertia SSR are not
+  deployed (warnings). Migrations and `php artisan optimize` run on every container start.
 - Python: check `stack.module` (the app object gunicorn/uvicorn loads, e.g. `main:app`). The analysis only looks
   at the project root, `app/` and `src/`; if the app object lives elsewhere, correct it in step C1.
 - From here on, `<name>` = the name the user gave, else `suggested_name`; `<port>` = `stack.port`;
@@ -128,11 +147,16 @@ plugin.
      400 to any other host).
    - `stack.ssr_marker` present: add `--expect <ssr_marker>`; `marker_found: false` means the page was not
      rendered on the server (a failure, rule 8).
-   - `stack.local_env` present (Django): `--routes / <check_routes>` and `--env` for each of its entries. With a
-     SQLite project it includes a temporary SQLite `DATABASE_URL`, so migrations, static files and the server are
-     all exercised. Without it (the project targets PostgreSQL), a start failure from `migrate` or the database
+   - `stack.local_env` present (Django, Laravel): `--routes / <check_routes>` and `--env` for each of its entries.
+     With a SQLite project (Django) or always (Laravel: `DB_CONNECTION=sqlite`) migrations run against a temporary
+     SQLite file, so migrations, static files or caches and the server are all exercised. Without it (the project targets PostgreSQL), a start failure from `migrate` or the database
      connection counts as «start needs the database» below.
-   Unless `stack.local_env` provides a `DATABASE_URL`, an app that needs a database (`databases` not empty) has
+   - Laravel failures that are the project's, not the deployment files' (no rule-8 retries; explain with the log
+     lines): a migration error caused by SQL that SQLite cannot run → report «local check limited» and go on; an
+     exception after the `Caching` lines (`php artisan optimize`: duplicate route names, a broken view) or during
+     `composer dump-autoload` / `package:discover` / `wayfinder:generate` in the build (a service provider that
+     needs the database or a variable while booting) → stop and explain.
+   Unless `stack.local_env` provides a database, an app that needs a database (`databases` not empty) has
    none locally: probe only routes that do not use it. A failure caused only by the missing database (connection refused / unknown host in `container_logs`) is
    **not** a build failure: report «build OK, start needs the database» and do not apply rule 8.
 3. On failure: read `build_error` / `container_logs`, fix **only** deployment files and repeat (rule 8). To
@@ -140,7 +164,7 @@ plugin.
 4. If it works, commit. A repository just created by `G init` has no commits yet: commit the whole project,
    deployment files included (`G commit <path> -m "chore: initial commit" --all`; allowed under rule 6, it changes
    no code). An existing repository: only the deployment files,
-   `G commit <path> -m "build: deploy to Coolify (…)" --files Dockerfile .dockerignore [nginx.conf] [coolify_settings.py]`.
+   `G commit <path> -m "build: deploy to Coolify (…)" --files Dockerfile .dockerignore [nginx.conf] [coolify_settings.py] [config/trustedproxy.php]`.
    If `G commit` returns `secrets`, stop (rule 3).
 
 ### D · Summary and confirmation (the only question)
@@ -153,8 +177,9 @@ Access:       public | protected with user and password
 Database:     no | PostgreSQL 17 (new, private) | external (DATABASE_URL supplied by you, with the variables)
 Variables:    <names> (values in ~/.config/coolify-ops/secrets/<name>.env; mark build-time ones) | none
               + <keys of stack.runtime_env> = the domain (set automatically)
+              + <keys of stack.url_env> = https://<the domain> (set automatically)
               + <keys of stack.generated_env> = random secret (generated on the server, never shown)
-Migrations:   (Django only) applied automatically on every start — with auto-deploy also on every push, without
+Migrations:   (Django and Laravel) applied automatically on every start — with auto-deploy also on every push, without
               asking; there are no database backups yet
 Resources:    max <cpus> CPU / <memory>
 Auto-deploy:  yes (every push publishes) | no
@@ -164,10 +189,11 @@ Local check:  OK (<seconds> s build, routes <…>)
 If `stack.warning_sqlite` is present, add to «Warnings»: «the PostgreSQL database starts empty: the admin user
 must be created again (step G)». If `build_time_env` lists secret keys, add to «Warnings»: «<keys> are needed at build time: Coolify passes them
 as build arguments, so their values stay in the image history on the server (not in logs)».
-If variables are needed, `C env-template <name> KEY1 KEY2 …` with the names from `env_vars` — never those in
+If variables are needed, `C env-template <name> KEY1 KEY2 …` with the names in `env_vars.in_code` plus the keys of
+`env_vars.example` (and the `changed_defaults` the user chose) — never those in
 `env_vars.managed` (it creates
 `~/.config/coolify-ops/secrets/<name>.env` with empty keys, mode 600, and never touches existing values). **Leave
-out `DATABASE_URL` when the skill creates the database** (step E4 sets it); include it when the database is
+out `DATABASE_URL` (Laravel: `DB_URL`, `stack.db_env_key`) when the skill creates the database** (step E4 sets it); include it when the database is
 external. Ask the user to fill in the values in
 that file (never in the chat). Wait for their «yes».
 
@@ -179,14 +205,16 @@ that file (never in the chat). Wait for their «yes».
 2. `C create-project <name>` → `project_uuid`.
 3. `C create-app --project <uuid> --repo <owner/repo> --branch <branch> --port <port> --domain <name> --name <name>`
    (+ `--cpus`/`--memory` to override defaults, `--no-autodeploy` if chosen, `--env-domain <KEY>` for each key of
-   `stack.runtime_env`, `--env-generate <KEY>` for each key of `stack.generated_env`) → `app_uuid`. If
-   `env_errors` is not empty the app **was** created: retry once the failed keys with `C env-domain <name> <KEY…>`
-   or `C env-generate <name> <KEY…>`; if it fails again, stop and explain (nothing to undo; the variable can be
+   `stack.runtime_env`, `--env-url <KEY>` for each key of `stack.url_env`, `--env-generate <KEY>` for each entry of
+   `stack.generated_env`, as written, e.g. `APP_KEY:laravel`) → `app_uuid`. If `env_errors` is not empty the app
+   **was** created: retry once the failed keys with `C env-domain`, `C env-url` or `C env-generate <name> <KEY…>`
+   (for `env-generate`, use the `key` of `env_errors` as it is, with its format, e.g. `APP_KEY:laravel`); if it fails again, stop and explain (nothing to undo; the variable can be
    set later the same way).
 4. With PostgreSQL, unless the user said they bring their own database (then `DATABASE_URL` is a variable like
    any other, uploaded in step E5, with `--buildtime` if it is in `build_time_env`):
-   `C create-postgres --project <uuid> --name <name> --app <name> --app-uuid <app_uuid>`
-   (creates a private database and sets `DATABASE_URL` on the app; the password is generated by the script and
+   `C create-postgres --project <uuid> --name <name> --app <name> --app-uuid <app_uuid>` (+ `--env-key
+   <stack.db_env_key>` when the analysis has one: Laravel reads `DB_URL`)
+   (creates a private database and sets `DATABASE_URL`, or that key, on the app; the password is generated by the script and
    never shown). Add `--buildtime` when `DATABASE_URL` is in `build_time_env` (the build inlines it).
 5. With variables: `C env-push <name> ~/.config/coolify-ops/secrets/<name>.env` (+ `--buildtime <KEY…>` with
    the keys of `build_time_env`, except `DATABASE_URL` when step E4 created it). If the result has
@@ -201,13 +229,22 @@ that file (never in the chat). Wait for their «yes».
    (`C wait <deployment_uuid> --lines 120`; Coolify copies the new container's output there) shows `Applying …`
    followed by a traceback, a **migration failed**: Coolify kept the previous version running (`C logs <name>`
    shows that old container, not the failed one). Report it with the error lines; it is a problem in the project's
-   migrations, not in the deployment files (no rule-8 retries).
+   migrations, not in the deployment files (no rule-8 retries). Laravel, in the same deployment log:
+   `Running migrations` then `FAIL` or a `QueryException` → migration failed (same handling); an exception after
+   the `Caching` lines → `optimize` failed (a project problem, same handling); connection refused to
+   `127.0.0.1:5432` → the database URL variable is missing (check `C env-list <name>`, redo step E4 with
+   `--env-key`); connection refused or `could not translate host name` to the database uuid on a first
+   deployment → the database was not ready yet: deploy once more; `could not find driver` → a variable overrides
+   `DB_CONNECTION`, or a PHP extension is missing.
    Otherwise fix deployment files, commit, push by the user and retry (rule 8).
 
 ### F · Verification
 `V https://<domain> --routes / [routes] --external --server`, adding `--protected` when the app has a user and
 password (its routes must then answer 401) and `--expect <ssr_marker>` when the analysis has one (not checked
-on protected apps: `marker_found` is then null). Django: `--routes <check_routes>` (without `/`). Any app whose
+on protected apps: `marker_found` is then null). Django: `--routes <check_routes>` (without `/`). Laravel:
+`--routes / <check_routes>` and, when `stack.verify_expect` is present and `/` answered 2xx in the local check,
+`--expect <verify_expect with {domain} replaced>` (asset URLs in https prove the proxy is trusted; never in step C).
+Without `verify_expect` (no front end, or `/` not 2xx) say «proxy trust not verified» in the wrap-up. Any app whose
 `/` answered 404 in the local check (a Django project with no home page, an API): use a route that answered 2xx
 there (FastAPI serves `/docs`) or `--routes / --accept-4xx` (401/403/404/405 then prove it is up; 400 does not). If the certificate is not valid yet, wait (the
 script already waits up to 2 minutes). If `external_unverified`, say so; it is not a failure.
@@ -216,7 +253,8 @@ script already waits up to 2 minutes). If `external_unverified`, say so; it is n
 Summarize in a few lines: URL, what was created (project, app, database), verification result and how to update
 («push to <branch> and it deploys by itself»). Django: the new database is empty (data in `db.sqlite3` was not
 copied); to use the admin, create a user with `python manage.py createsuperuser` in the app's *Terminal* tab in
-Coolify (it asks for the password there, never in the chat). The local registry (`apps.json`) is updated by the scripts.
+Coolify (it asks for the password there, never in the chat). Laravel: the database is empty too; users sign up
+through the app, or are created with `php artisan tinker` in the same *Terminal* tab. The local registry (`apps.json`) is updated by the scripts.
 
 ---
 
@@ -226,10 +264,11 @@ Coolify (it asks for the password there, never in the chat). The local registry 
 |---|---|
 | `protect <app>` / `unprotect <app>` | Confirm with the user → `C protect <app> [--user <user>]` (or `--off`) → `C deploy <app>` → `C wait …`. The credentials stay in `secrets/<app>.access` |
 | `status` | `C status` → table: app, status, domain, auto-deploy (`C last-deployment <app>` if useful). Every command accepts the app's name (from `apps.json` or from the server) or its uuid; if a name is ambiguous, use the uuid |
-| `logs <app>` | `C logs <app>` and `C last-deployment <app>`; summarize errors |
+| `logs <app>` | `C logs <app>` and `C last-deployment <app>`; summarize errors. `C logs` shows the **running** container: if the last deployment `failed`, read its log as in the next row |
+| «my change does not show», «it did not update» | `G state <path>`: `to_push` not empty → the change was never pushed (see «Pushes»). Otherwise `C last-deployment <app>`: `failed` → `C wait <deployment_uuid> --lines 120` and diagnose as in step E8 (migration, `optimize`, database URL, build error; the previous version is still running); `in_progress`/`queued` → `C wait <deployment_uuid>`; no deployment after the push → auto-deploy is off or the webhook did not arrive: `C deploy <app>` (the GitHub App webhook can be checked in Coolify). Only then suggest a hard refresh of the browser |
 | `update <app>` | `G state <path>`; local changes → `G commit <path> -m "<message>" --all` → push by the user → `C last-deployment <app>` until the new commit shows up → `C wait …` → `V …`. Without auto-deploy: `C deploy <app>` |
 | `env <app>` | `C env-list <app>` (names only). To add or change values: `C env-template <app> <KEY…>` if new keys → the user edits `secrets/<app>.env` → `C env-push <app> <file> --only <KEY…>` with **only** the keys added or changed (pushing the whole file would overwrite values changed in the panel since) → `C deploy <app>` → `C wait <deployment_uuid>` → `V https://<domain>`. To delete one: confirm with the user → `C env-delete <app> <KEY> --confirmed`. Do not use `env-set` with a value on the command line |
-| `rollback <app>` | `C rollback <app>` lists images (read-only, no question): `current` is the running tag, `images[]` have `tag`, `created_at`, `is_current`; «the previous version» = the newest image that is not current. No image besides the current one → say a rollback is not possible and offer an `update` with a `git revert` made by the user. Otherwise show them, **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` → `C wait <deployment_uuid>` → `V https://<domain>` (`--protected` if it has a user and password). Domain and auto-deploy come from `C status` (`domains`, `autodeploy`) when the app is not in `apps.json`. If auto-deploy is on, warn that the next push replaces the rollback. Django: a rollback restores the code, not the database: migrations already applied stay |
+| `rollback <app>` | `C rollback <app>` lists images (read-only, no question): `current` is the running tag, `images[]` have `tag`, `created_at`, `is_current`; «the previous version» = the newest image that is not current. No image besides the current one → say a rollback is not possible and offer an `update` with a `git revert` made by the user. Otherwise show them, **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` → `C wait <deployment_uuid>` → `V https://<domain>` (`--protected` if it has a user and password). Domain and auto-deploy come from `C status` (`domains`, `autodeploy`) when the app is not in `apps.json`. If auto-deploy is on, warn that the next push replaces the rollback. Django and Laravel: a rollback restores the code, not the database: migrations already applied stay |
 | `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. If the database or project is not in `apps.json`, the script refuses before deleting anything: tell the user and offer to delete only the app. The script watches the server until Coolify's cleanup is done before removing the project; if `deleted.warning` appears, the project was kept: tell the user. It also deletes the app's local `secrets/<app>.env` and `.access` (listed in `deleted.local_files`) |
 
 ---

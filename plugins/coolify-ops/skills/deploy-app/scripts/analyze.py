@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from phpstack import GENERATED_MARKER, analyze_laravel, laravel_env, php_framework  # noqa: E402
 from pystack import analyze_python, is_django  # noqa: E402
 
 IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".angular", ".output",
@@ -37,7 +38,7 @@ SECRET_PATTERNS = {
     "URL with password": r"\b[a-z][a-z0-9+.-]*://[^\s:/@'\"]+:[^\s@'\"]{6,}@(?!localhost|127\.0\.0\.1|example)",
 }
 SENSITIVE_FILES = re.compile(r"(^|/)(\.env(\.[\w-]+)?|.*\.pem|.*\.key|id_rsa|id_ed25519|credentials\.json|"
-                             r"service-account.*\.json|wp-config\.php)$")
+                             r"service-account.*\.json|wp-config\.php|auth\.json)$")
 ENV_TEMPLATE_FILES = re.compile(r"\.env\.(example|sample|template|dist|demo)$")
 
 LOGIN_LIBS = ["next-auth", "@auth/", "passport", "@supabase/auth", "@clerk/", "lucia", "better-auth", "firebase/auth",
@@ -141,7 +142,16 @@ def env_vars_used(root: Path, files: list[Path]) -> dict:
     return {"example": example, "in_code": sorted((in_code | build_time) - ignored), "build_time": sorted(build_time)}
 
 
-def detect_monorepo(root: Path, files: list[Path]) -> list[str]:
+def compose_services(text: str) -> list[str]:
+    """Service names of a compose file: 2-space keys inside the top-level services: block only."""
+    m = re.search(r"^services:[ \t]*$(.*?)(?=^\S|\Z)", text, re.M | re.S)
+    indent = re.search(r"^([ \t]+)\S", m.group(1), re.M) if m else None  # 2 spaces, 4 (Laravel Sail)…
+    if not indent:
+        return []
+    return re.findall(rf"^{indent.group(1)}([A-Za-z0-9_.-]+):\s*$", m.group(1), re.M)
+
+
+def detect_monorepo(root: Path, files: list[Path], laravel: bool = False) -> list[str]:
     reasons = [m for m in ("nx.json", "turbo.json", "pnpm-workspace.yaml", "lerna.json", "rush.json")
                if (root / m).exists()]
     pkg = root / "package.json"
@@ -159,7 +169,9 @@ def detect_monorepo(root: Path, files: list[Path]) -> list[str]:
     for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
         dc = root / name
         if dc.exists():
-            services = re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", read(dc), re.M)
+            services = compose_services(read(dc))
+            if laravel and "laravel.test" in services:  # Laravel Sail: local development only
+                continue
             if len(services) > 1:
                 reasons.append(f"{name} with {len(services)} services ({', '.join(services[:5])})")
     return reasons
@@ -474,6 +486,22 @@ def analyze_node(root: Path) -> dict:
     return r
 
 
+def infer_databases(stack: dict, names: set, manifests: str) -> list[str]:
+    dbs = []
+    if "DATABASE_URL" in names or any(x in manifests for x in ("psycopg", "asyncpg", '"pg"', "postgres",
+                                                                "sqlalchemy", "prisma")):
+        dbs.append("postgresql")
+    if stack.get("db_engine") in ("postgresql", "sqlite") and "postgresql" not in dbs:
+        dbs.append("postgresql")  # Django: SQLite would lose its data on every deploy
+    if any(x in manifests for x in ("mysql", "mariadb")) or stack.get("db_engine") == "mysql":
+        dbs.append("mysql")
+    if any(x in manifests for x in ("mongoose", "mongodb", "pymongo")):
+        dbs.append("mongodb")
+    if "REDIS_URL" in names or any(x in manifests for x in ('"redis"', "ioredis", "redis==", "redis>")):
+        dbs.append("redis")
+    return dbs
+
+
 def analyze(root: Path) -> dict:
     root = root.resolve()
     if not root.is_dir():
@@ -501,7 +529,8 @@ def analyze(root: Path) -> dict:
         res["git"] = None
 
     # --- stack
-    monorepo = detect_monorepo(root, files)
+    php = php_framework(root)
+    monorepo = detect_monorepo(root, files, laravel=php == "laravel")
     if monorepo:
         res["monorepo"] = monorepo
         blockers.append("monorepo or several services (" + "; ".join(monorepo) + "): not supported yet")
@@ -517,17 +546,21 @@ def analyze(root: Path) -> dict:
                 "Django with a frontend build (package.json) is not supported yet: add your own Dockerfile"))
         elif (root / "package.json").exists():
             warnings.append("package.json is ignored: the image only installs the Python dependencies")
+    elif php == "laravel":  # wins over its package.json (Vite)
+        res["stack"] = analyze_laravel(root, files)
+        if any("laravel.test" in compose_services(read(root / n)) for n in ("docker-compose.yml", "docker-compose.yaml",
+                                                                             "compose.yml", "compose.yaml")):
+            warnings.append("Sail's compose file is for local development: only the web app is deployed, with "
+                            "PostgreSQL")
+    elif php == "symfony":
+        res["stack"] = {"language": "php", "framework": "symfony", "template": None,
+                        "warning_framework": "Symfony has no template yet: add your own Dockerfile"}
     elif (root / "package.json").exists():
         res["stack"] = analyze_node(root)
     elif (root / "requirements.txt").exists() or (root / "pyproject.toml").exists() or (root / "Pipfile").exists():
         res["stack"] = analyze_python(root, files)
     elif (root / "composer.json").exists() or any(f.suffix == ".php" for f in files):
-        composer = read(root / "composer.json")
-        if "laravel/framework" in composer or "symfony/" in composer:
-            res["stack"] = {"language": "php", "framework": "laravel/symfony", "template": None,
-                            "warning_framework": "full PHP framework: no template yet"}
-        else:
-            res["stack"] = {"language": "php", "framework": "php", "template": "php-apache", "port": 80}
+        res["stack"] = {"language": "php", "framework": "php", "template": "php-apache", "port": 80}
     elif (root / "index.html").exists():
         res["stack"] = {"language": "html", "framework": "static", "template": "static-nginx", "port": 80}
     else:
@@ -543,6 +576,11 @@ def analyze(root: Path) -> dict:
         if stack.pop("warning_framework", None):  # the project's own Dockerfile is used as is
             warnings.append(f"{stack.get('framework') or 'this stack'} has no template: the project's own Dockerfile "
                             "is used as is (check its EXPOSE and that it listens on 0.0.0.0)")
+        if stack.get("trust_proxies") == "generated" and GENERATED_MARKER not in read(root / "config" / "trustedproxy.php"):
+            # Laravel with a foreign Dockerfile: no proxy file is generated (one written by prepare.py stays valid)
+            stack["trust_proxies"] = "dockerfile"
+            stack["warning_proxies"] = ("your Dockerfile or app must trust Coolify's proxy (e.g. trustProxies(at: '*')) "
+                                        "or URLs and assets will use http://")
         if expose:
             stack["port"] = int(expose[-1])
         else:
@@ -553,6 +591,9 @@ def analyze(root: Path) -> dict:
 
     # --- variables, databases, login, paid services
     res["env_vars"] = env_vars_used(root, files)
+    if stack.get("framework") == "laravel":
+        warnings += laravel_env(root, files, res["env_vars"], bool(stack.get("existing_dockerfile")),
+                                stack.get("laravel_version"))
     managed = set(stack.get("managed_env") or [])
     if managed:  # set by the deployment itself (generated, from the domain, the database): never asked from the user
         res["env_vars"]["in_code"] = [k for k in res["env_vars"]["in_code"] if k not in managed]
@@ -565,28 +606,20 @@ def analyze(root: Path) -> dict:
                         "values with --build-env to the local check")
     manifests = " ".join(read(f).lower() for f in files if f.name in {*MANIFESTS, "schema.prisma", "drizzle.config.ts"})
     names = set(res["env_vars"]["in_code"]) | set(res["env_vars"]["example"])
-    dbs = []
-    if "DATABASE_URL" in names or any(x in manifests for x in ("psycopg", "asyncpg", '"pg"', "postgres",
-                                                                "sqlalchemy", "prisma")):
-        dbs.append("postgresql")
-    if stack.get("db_engine") in ("postgresql", "sqlite") and "postgresql" not in dbs:
-        dbs.append("postgresql")  # Django: SQLite would lose its data on every deploy
-    if any(x in manifests for x in ("mysql", "mariadb")) or stack.get("db_engine") == "mysql":
-        dbs.append("mysql")
-    if any(x in manifests for x in ("mongoose", "mongodb", "pymongo")):
-        dbs.append("mongodb")
-    if "REDIS_URL" in names or any(x in manifests for x in ('"redis"', "ioredis", "redis==", "redis>")):
-        dbs.append("redis")
-    if "supabase" in manifests:
-        res["external_services"] = ["supabase (hosted: only its variables are needed)"]
-        if "DATABASE_URL" not in names:  # with Supabase the database is hosted, unless it uses its own URL
-            dbs = [d for d in dbs if d != "postgresql"]
+    if stack.get("framework") == "laravel":  # decided by phpstack alone (config/database.php names every driver)
+        dbs = list(stack["databases"])
+    else:
+        dbs = infer_databases(stack, names, manifests)
+        if "supabase" in manifests:
+            res["external_services"] = ["supabase (hosted: only its variables are needed)"]
+            if "DATABASE_URL" not in names:  # with Supabase the database is hosted, unless it uses its own URL
+                dbs = [d for d in dbs if d != "postgresql"]
     res["databases"] = dbs
     others = [d for d in dbs if d != "postgresql"]
     if others:
         blockers.append(f"uses {', '.join(others)}: only PostgreSQL can be created by this skill "
                         "(create it in Coolify by hand, or remove the dependency if it is unused)")
-    res["has_login_estimate"] = any(lib in manifests for lib in LOGIN_LIBS)
+    res["has_login_estimate"] = any(lib in manifests for lib in LOGIN_LIBS) or bool(stack.get("has_login"))
     paid = sorted({p for p in PAID_SERVICE_HINTS if p in manifests})
     res["paid_services_estimate"] = paid
     if paid and not res["has_login_estimate"]:

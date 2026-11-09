@@ -18,6 +18,7 @@ Usage:  coolify.py <command> [options]      (coolify.py --help for the list)
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -307,6 +308,9 @@ def cmd_create_project(a):
 
 
 def cmd_create_postgres(a):
+    env_key = getattr(a, "env_key", None) or "DATABASE_URL"
+    if not ENV_KEY.fullmatch(env_key):
+        raise Error(f"Invalid variable name: {env_key}")
     cfg = config()
     password = random_password()
     user = re.sub(r"[^a-z0-9_]", "_", a.name.lower())[:30] or "app"
@@ -317,16 +321,17 @@ def cmd_create_postgres(a):
     uuid = r["uuid"]
     internal_url = f"postgres://{user}:{password}@{uuid}:5432/{user}"
     save_to_registry(a.app or a.name, {"db_uuid": uuid, "project_uuid": a.project})
-    if a.app_uuid:  # connect it to the app as DATABASE_URL (secret; build time too only if the build inlines it)
-        _set_env(a.app_uuid, "DATABASE_URL", internal_url, secret=True, buildtime=getattr(a, "buildtime", False))
-    return {"ok": True, "db_uuid": uuid, "internal_host": uuid, "user": user,
+    if a.app_uuid:  # connect it to the app as DATABASE_URL or --env-key (secret; build time only if the build inlines it)
+        _set_env(a.app_uuid, env_key, internal_url, secret=True, buildtime=getattr(a, "buildtime", False))
+    return {"ok": True, "db_uuid": uuid, "internal_host": uuid, "user": user, "env_key": env_key,
             "database_url": mask(internal_url), "linked_to_app": bool(a.app_uuid)}
 
 
 def cmd_create_app(a):
     cfg = config()
-    bad = [k for k in (getattr(a, "env_domain", None) or []) + (getattr(a, "env_generate", None) or [])
+    bad = [k for k in (getattr(a, "env_domain", None) or []) + (getattr(a, "env_url", None) or [])
            if not ENV_KEY.fullmatch(k)]
+    bad += [k for k in getattr(a, "env_generate", None) or [] if not _generated_key(k)]
     if bad:
         raise Error(f"Invalid variable names: {', '.join(bad)}")
     check = cmd_domain_check(argparse.Namespace(host=a.domain))
@@ -352,51 +357,71 @@ def cmd_create_app(a):
     res = {"ok": True, "app_uuid": uuid, "url": f"https://{check['host']}"}
     if getattr(a, "env_domain", None):  # the app exists now: report env failures instead of raising, so the uuid is never lost
         res["env_domain"], res["env_errors"] = _set_domain_envs(uuid, check["host"], a.env_domain)
+    if getattr(a, "env_url", None):
+        res["env_url"], errors = _set_domain_envs(uuid, check["host"], a.env_url, scheme="https://")
+        res["env_errors"] = res.get("env_errors", []) + errors
     if getattr(a, "env_generate", None):
         res["env_generated"], errors = _generate_envs(uuid, a.env_generate)
         res["env_errors"] = res.get("env_errors", []) + errors
     return res
 
 
-def _generate_envs(app_uuid: str, keys: list[str]) -> tuple[dict, list[dict]]:
-    """Set each KEY to a random secret (e.g. DJANGO_SECRET_KEY) unless it already exists: re-running never
-    rotates it. The value goes straight to the API and is never printed or stored locally."""
+# Secret formats for env-generate (KEY or KEY:format). «laravel»: APP_KEY as key:generate makes it.
+SECRET_FORMATS = {
+    "": lambda: secrets.token_urlsafe(50),
+    "laravel": lambda: "base64:" + base64.b64encode(secrets.token_bytes(32)).decode(),
+}
+
+
+def _generated_key(spec: str) -> tuple[str, str] | None:
+    """«KEY» or «KEY:format» → (KEY, format), or None when the name or the format is not valid."""
+    key, _, fmt = spec.partition(":")
+    return (key, fmt) if ENV_KEY.fullmatch(key) and fmt in SECRET_FORMATS else None
+
+
+def _generate_envs(app_uuid: str, specs: list[str]) -> tuple[dict, list[dict]]:
+    """Set each KEY to a random secret (e.g. DJANGO_SECRET_KEY, APP_KEY:laravel) unless it already exists:
+    re-running never rotates it. The value goes straight to the API and is never printed or stored locally."""
     existing = {e.get("key") for e in api("GET", f"/applications/{app_uuid}/envs") or [] if not e.get("is_preview")}
     done, errors = {}, []
-    for key in dict.fromkeys(keys):
+    wanted = {}
+    for spec in specs:  # one value per key: «KEY KEY:laravel» never sets the key twice
+        wanted.setdefault(_generated_key(spec)[0], spec)
+    for key, spec in wanted.items():
+        fmt = _generated_key(spec)[1]
         if key in existing:
             done[key] = "kept"
             continue
         try:
-            _set_env(app_uuid, key, secrets.token_urlsafe(50), secret=True, buildtime=False)
+            _set_env(app_uuid, key, SECRET_FORMATS[fmt](), secret=True, buildtime=False)
             done[key] = "created"
         except Error as e:
-            errors.append({"key": key, "error": str(e)})
+            errors.append({"key": spec, "error": str(e)})  # with its format: retry as is
     return done, errors
 
 
 def cmd_env_generate(a):
-    """Random secret values for KEY… (only for keys the app does not have yet)."""
-    bad = [k for k in a.keys if not ENV_KEY.fullmatch(k)]
+    """Random secret values for KEY or KEY:format… (only for keys the app does not have yet)."""
+    bad = [k for k in a.keys if not _generated_key(k)]
     if bad:
         raise Error(f"Invalid variable names: {', '.join(bad)}")
     done, errors = _generate_envs(resolve_app(a.app), a.keys)
     return {"ok": not errors, "env_generated": done, "env_errors": errors}
 
 
-def _set_domain_envs(app_uuid: str, host: str, keys: list[str]) -> tuple[list[str], list[dict]]:
-    """Set each KEY=<host> as a runtime variable (public value: the app's own domain)."""
+def _set_domain_envs(app_uuid: str, host: str, keys: list[str], scheme: str = "") -> tuple[list[str], list[dict]]:
+    """Set each KEY=<host> (or <scheme><host>, e.g. APP_URL=https://host) as a runtime variable (public value)."""
     done, errors = [], []
     for key in dict.fromkeys(keys):
         try:
-            _set_env(app_uuid, key, host, secret=False, buildtime=False)
+            _set_env(app_uuid, key, scheme + host, secret=False, buildtime=False)
             done.append(key)
         except Error as e:
             errors.append({"key": key, "error": str(e)})
     return done, errors
 
 
-def cmd_env_domain(a):
+def cmd_env_domain(a, scheme: str = ""):
     """Set KEY=<the app's domain host> (e.g. NG_ALLOWED_HOSTS) without the value going through the command line."""
     bad = [k for k in a.keys if not ENV_KEY.fullmatch(k)]
     if bad:
@@ -406,8 +431,13 @@ def cmd_env_domain(a):
     host = host_of(fqdn.split(",")[0]) if fqdn else ""
     if not host:
         raise Error("The app has no domain")
-    done, errors = _set_domain_envs(app, host, a.keys)
-    return {"ok": not errors, "host": host, "env_domain": done, "env_errors": errors}
+    done, errors = _set_domain_envs(app, host, a.keys, scheme)
+    return {"ok": not errors, "host": host, "env_url" if scheme else "env_domain": done, "env_errors": errors}
+
+
+def cmd_env_url(a):
+    """Set KEY=https://<the app's domain host> (e.g. APP_URL)."""
+    return cmd_env_domain(a, scheme="https://")
 
 
 def _set_env(app_uuid: str, key: str, value: str, secret: bool, buildtime: bool | None = None) -> dict:
@@ -769,12 +799,19 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--no-autodeploy", dest="no_autodeploy", action="store_true")
     c.add_argument("--env-domain", dest="env_domain", action="append", metavar="KEY",
                    help="set KEY=<the app's domain> as a runtime variable (repeatable), e.g. NG_ALLOWED_HOSTS")
-    c.add_argument("--env-generate", dest="env_generate", action="append", metavar="KEY",
-                   help="set KEY to a random secret unless it exists (repeatable), e.g. DJANGO_SECRET_KEY")
+    c.add_argument("--env-url", dest="env_url", action="append", metavar="KEY",
+                   help="set KEY=https://<the app's domain> as a runtime variable (repeatable), e.g. APP_URL")
+    c.add_argument("--env-generate", dest="env_generate", action="append", metavar="KEY[:FORMAT]",
+                   help="set KEY to a random secret unless it exists (repeatable), e.g. DJANGO_SECRET_KEY, "
+                        "APP_KEY:laravel")
     c.set_defaults(f=cmd_create_app)
 
-    c = s.add_parser("env-generate", help="set KEY… to random secrets, only if missing (values are never printed)")
-    c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_generate)
+    c = s.add_parser("env-generate", help="set KEY… to random secrets, only if missing (values are never printed); "
+                                          "KEY:laravel gives a Laravel APP_KEY")
+    c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY[:FORMAT]"); c.set_defaults(f=cmd_env_generate)
+
+    c = s.add_parser("env-url", help="set KEY=https://<the app's domain> as a runtime variable (e.g. APP_URL)")
+    c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_url)
 
     c = s.add_parser("env-domain", help="set KEY=<the app's domain> as a runtime variable (e.g. NG_ALLOWED_HOSTS)")
     c.add_argument("app"); c.add_argument("keys", nargs="+", metavar="KEY"); c.set_defaults(f=cmd_env_domain)
@@ -786,6 +823,8 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--memory", default="512m")
     c.add_argument("--buildtime", action="store_true",
                    help="DATABASE_URL also at build time (when the build inlines it, e.g. SvelteKit $env/static/private)")
+    c.add_argument("--env-key", dest="env_key", default="DATABASE_URL", metavar="KEY",
+                   help="name of the app variable that receives the URL (Laravel: DB_URL)")
     c.set_defaults(f=cmd_create_postgres)
 
     c = s.add_parser("env-set", help="KEY=value (with --stdin the value is read from standard input)")
