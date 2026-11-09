@@ -45,6 +45,10 @@ PUBLIC_PREFIXES = ("NEXT_PUBLIC_", "VITE_", "PUBLIC_", "NUXT_PUBLIC_", "REACT_AP
 # Keys used by v0.1 (Spanish) → current keys. Applied when reading old files.
 LEGACY_CONFIG_KEYS = {"dominio_base": "base_domain", "subdominios_reservados": "reserved_subdomains",
                       "carpeta_proyectos": "projects_dir", "limites_defecto": "default_limits"}
+# Coolify's own checks of these fields (app/Support/ValidationPatterns.php); watch paths are globs, «!» excludes
+BASE_DIR = re.compile(r"/[A-Za-z0-9._~@+/-]*")
+DOCKERFILE_PATH = re.compile(r"/[A-Za-z0-9._~@+/-]+")
+WATCH_PATH = re.compile(r"!?[A-Za-z0-9._~@+/*?\[\]-]+")
 LEGACY_REGISTRY_KEYS = {"proyecto_uuid": "project_uuid", "dominio": "domain", "rama": "branch",
                         "actualizado": "updated"}
 
@@ -265,7 +269,7 @@ def _autodeploy(app: dict):
 def cmd_status(_a):
     apps = [{"name": ap.get("name"), "uuid": ap.get("uuid"), "status": ap.get("status"),
              "domains": ap.get("fqdn"), "repo": ap.get("git_repository"), "branch": ap.get("git_branch"),
-             "autodeploy": _autodeploy(ap)} for ap in _apps()]
+             "base_dir": ap.get("base_directory") or "/", "autodeploy": _autodeploy(ap)} for ap in _apps()]
     dbs = [{"name": d.get("name"), "uuid": d.get("uuid"), "type": d.get("database_type"), "status": d.get("status"),
             "public": d.get("is_public")} for d in (api("GET", "/databases") or [])]
     return {"ok": True, "apps": apps, "databases": dbs, "local_registry": sorted(registry())}
@@ -327,6 +331,18 @@ def cmd_create_postgres(a):
             "database_url": mask(internal_url), "linked_to_app": bool(a.app_uuid)}
 
 
+def _path_errors(a) -> list[str]:
+    """Paths Coolify would reject (app/Support/ValidationPatterns.php): checked before anything is created."""
+    errors = []
+    for value, pattern, what in ((getattr(a, "base_dir", None), BASE_DIR, "--base-dir"),
+                                 (getattr(a, "dockerfile", None), DOCKERFILE_PATH, "--dockerfile")):
+        if value is not None and (not pattern.fullmatch(value) or ".." in value):
+            errors.append(f"{what} {value!r}")
+    errors += [f"--watch-paths {p!r}" for p in getattr(a, "watch_paths", None) or []
+               if not WATCH_PATH.fullmatch(p) or ".." in p]
+    return errors
+
+
 def cmd_create_app(a):
     cfg = config()
     bad = [k for k in (getattr(a, "env_domain", None) or []) + (getattr(a, "env_url", None) or [])
@@ -334,6 +350,10 @@ def cmd_create_app(a):
     bad += [k for k in getattr(a, "env_generate", None) or [] if not _generated_key(k)]
     if bad:
         raise Error(f"Invalid variable names: {', '.join(bad)}")
+    paths = _path_errors(a)
+    if paths:
+        raise Error(f"Invalid paths (letters, digits and . _ - ~ @ + / only, plus * ? [ ] ! in watch paths; no ..): "
+                    f"{', '.join(paths)}")
     check = cmd_domain_check(argparse.Namespace(host=a.domain))
     if not check["available"]:
         raise Error(f"Domain {check['host']} not available: {', '.join(check['reasons'])}")
@@ -350,10 +370,12 @@ def cmd_create_app(a):
         body["dockerfile_location"] = a.dockerfile
     if a.base_dir:
         body["base_directory"] = a.base_dir
+    if getattr(a, "watch_paths", None):  # only pushes that change these paths redeploy (repo-relative globs)
+        body["watch_paths"] = "\n".join(a.watch_paths)
     r = api("POST", "/applications/private-github-app", body)
     uuid = r["uuid"]
     save_to_registry(a.name, {"app_uuid": uuid, "project_uuid": a.project, "domain": check["host"],
-                              "repo": a.repo, "branch": a.branch})
+                              "repo": a.repo, "branch": a.branch, "base_dir": a.base_dir or "/"})
     res = {"ok": True, "app_uuid": uuid, "url": f"https://{check['host']}"}
     if getattr(a, "env_domain", None):  # the app exists now: report env failures instead of raising, so the uuid is never lost
         res["env_domain"], res["env_errors"] = _set_domain_envs(uuid, check["host"], a.env_domain)
@@ -747,7 +769,10 @@ def cmd_decommission(a):
         target = (read_json(CONFIG, {}) or {}).get("ssh")
         removed = _remove_app_images(target, app) if target else None
         deleted["images"] = removed if removed is not None else "left to Coolify's scheduled Docker cleanup"
-    if not deleted.get("warning") and a.with_project:
+    sharing = sorted(k for k, v in reg.items() if k != name and v.get("project_uuid") == entry.get("project_uuid"))
+    if not deleted.get("warning") and a.with_project and sharing:  # one project per repository: others still in it
+        deleted["project_kept"] = f"other apps still in it: {', '.join(sharing)}"
+    elif not deleted.get("warning") and a.with_project:
         try:
             api("DELETE", f"/projects/{reg[name]['project_uuid']}")
             deleted["project"] = reg[name]["project_uuid"]
@@ -796,6 +821,8 @@ def parser() -> argparse.ArgumentParser:
         c.add_argument(arg, required=True)
     c.add_argument("--environment", default="production"); c.add_argument("--cpus"); c.add_argument("--memory")
     c.add_argument("--dockerfile"); c.add_argument("--base-dir", dest="base_dir")
+    c.add_argument("--watch-paths", dest="watch_paths", action="append", metavar="GLOB",
+                   help="redeploy on push only when these repo-relative paths change (repeatable), e.g. 'frontend/**'")
     c.add_argument("--no-autodeploy", dest="no_autodeploy", action="store_true")
     c.add_argument("--env-domain", dest="env_domain", action="append", metavar="KEY",
                    help="set KEY=<the app's domain> as a runtime variable (repeatable), e.g. NG_ALLOWED_HOSTS")

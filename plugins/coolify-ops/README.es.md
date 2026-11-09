@@ -42,8 +42,11 @@ todo en castellano: Claude te responde en tu idioma.
 | Cualquier proyecto de un solo servicio con su propio `Dockerfile` (de cualquier framework) | se usa tal cual |
 
 Las dependencias de Python se instalan desde `requirements.txt`, `uv.lock`, `poetry.lock` o un `pyproject.toml`
-sencillo. Con PostgreSQL privado opcional (en Django y Laravel se crea siempre). **Todavía no** admite (la skill para y lo explica): monorepos, apps de varios
-servicios, apps que necesitan MySQL/MariaDB, MongoDB o Redis y, salvo que traigan su propio `Dockerfile`, Django
+sencillo. Con PostgreSQL privado opcional (en Django y Laravel se crea siempre). Un repositorio con **varias apps en
+subcarpetas** (p. ej. `backend/` + `frontend/`, nada en la raíz) se despliega como una app por carpeta: cada una con
+su dominio, todas en un mismo proyecto de Coolify, y cada una se redespliega solo cuando cambia su carpeta.
+**Todavía no** admite (la skill para y lo explica): workspaces (de npm/yarn/pnpm, Turborepo, Nx, uv…), una app en
+la raíz junto a varias carpetas de apps, apps de varios servicios, apps que importan código de fuera de su carpeta, apps que necesitan MySQL/MariaDB, MongoDB o Redis y, salvo que traigan su propio `Dockerfile`, Django
 con build de frontend (`package.json`), proyectos con Pipenv, Symfony, Laravel 10 o anterior (o con la estructura anterior a la 11, con Laravel Mix o con repositorios Composer privados), Nuxt 2, Angular Universal, Remix con Vite sin script `start`, SolidStart, Qwik City, Vike, TanStack Start, Analog y los proyectos
 preparados para otra plataforma (p. ej. SvelteKit con `adapter-auto` o `@astrojs/vercel`): la skill dice qué cambiar.
 

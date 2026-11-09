@@ -40,8 +40,11 @@ push. Everything goes through the Coolify API: no browser automation.
 | Any single-service project with its own `Dockerfile` (any framework) | used as is |
 
 Python dependencies are installed from `requirements.txt`, `uv.lock`, `poetry.lock` or a plain `pyproject.toml`.
-Optionally with a private PostgreSQL (always created for Django and Laravel). **Not** covered yet (the skill stops and explains): monorepos, multi-service
-apps, apps that need MySQL/MariaDB, MongoDB or Redis, and — unless they bring their own `Dockerfile` — Django
+Optionally with a private PostgreSQL (always created for Django and Laravel). A repository with **several apps in
+subfolders** (e.g. `backend/` + `frontend/`, nothing at the root) is deployed one app per folder: each with its own
+domain, in one Coolify project per repository, and redeployed only when its own folder changes.
+**Not** covered yet (the skill stops and explains): workspaces (npm/yarn/pnpm workspaces, Turborepo, Nx, uv…), a
+root app plus several app folders, multi-service apps, apps that import code from outside their folder, apps that need MySQL/MariaDB, MongoDB or Redis, and — unless they bring their own `Dockerfile` — Django
 with a frontend build (`package.json`), Pipenv projects, Symfony, Laravel 10 or older (or with the pre-11 structure, Laravel Mix or private Composer repositories), Nuxt 2, Angular Universal, Remix with Vite and no `start` script, SolidStart, Qwik City, Vike, TanStack Start, Analog, and projects
 built for another platform (e.g. SvelteKit `adapter-auto`, `@astrojs/vercel`): the skill says what to change.
 

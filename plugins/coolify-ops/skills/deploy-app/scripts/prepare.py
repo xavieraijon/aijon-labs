@@ -19,7 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE.parent / "templates"
 sys.path.insert(0, str(HERE))
-from analyze import analyze  # noqa: E402
+from analyze import analyze, with_build_args  # noqa: E402
 from phpstack import COMPOSER_COPY, COMPOSER_VERSION, EXT_INSTALLER, EXTENSION  # noqa: E402
 from pystack import (  # noqa: E402
     COLLECTSTATIC,
@@ -168,6 +168,7 @@ def main() -> None:
     if laravel and stack.get("trust_proxies", "generated") == "generated":
         plan.append(("config/trustedproxy.php", TEMPLATES / "laravel-trustedproxy.php.tmpl"))
 
+    build_time = analysis.get("build_time_candidates") or []
     created, skipped = [], []
     try:
         for target, source in plan:
@@ -176,6 +177,8 @@ def main() -> None:
                 skipped.append(target)
                 continue
             content = render(source.read_text(), v)
+            if target == "Dockerfile":
+                content = with_build_args(content, build_time)
             if not a.dry_run:
                 path.write_text(content)
             created.append(target)

@@ -47,7 +47,8 @@ plugin.
 2. **Pushing to GitHub is done by the user.** Never run `git push`, `gh repo create --push` or anything that
    uploads code. Prepare the commit and give the exact command for them to run with `!` (see «Pushes»). Wait.
 3. **Secrets:** if `analyze.py` finds secrets in files that would be pushed, **stop** and explain what and where
-   (never the values). Before every push, `A <path> --secrets` must come back clean. Variable values never go
+   (never the values). Before every push, `A <repo> --secrets` must come back clean (`<repo>` = `git.root`: a push
+   publishes the whole repository; the same as `<path>` for a single app). Variable values never go
    through the chat: they live in `~/.config/coolify-ops/secrets/<app>.env` (created by `env-template`) and are
    uploaded with `env-push`. Never pass a value on the command line.
 4. **Never** make a database public or open router ports. Never use a reserved or already used subdomain
@@ -67,7 +68,10 @@ plugin.
    frontend build (`package.json`), Pipenv projects, Symfony, Laravel 10 or older (or with the pre-11 structure),
    Laravel Mix, private Composer repositories, Nuxt 2, Angular Universal, adapters for other platforms (Vercel, Netlify,
    Cloudflare, SvelteKit `adapter-auto`…), SolidStart, Qwik City, Vike, TanStack Start and Analog are not covered
-   yet. Monorepos, multi-service apps and apps that need MySQL/MariaDB, MongoDB or Redis are not covered either.
+   yet. A repository with **several apps in subfolders** is covered, one app per folder (see «Repositories with
+   several apps»); workspaces (npm/yarn/pnpm workspaces, Turborepo, Nx, Lerna, Rush, uv), a root app plus several
+   app folders, multi-service compose files, apps that import code from outside their folder and apps that need
+   MySQL/MariaDB, MongoDB or Redis are not covered.
    In all these cases: **stop and explain** (the analysis reports them as `blockers`, with the change that would
    make the project deployable; the skill never makes that change itself, rule 6).
 
@@ -77,7 +81,7 @@ plugin.
 
 ### A · Pre-flight
 0. If the user already says the project is out of scope (rule 9) and has no Dockerfile of its own, skip the
-   checks below: run only `A <path> --secrets` (to warn about secrets that would be pushed) and explain.
+   checks below: run only `A <path> --secrets` (on the repository root; to warn about secrets that would be pushed) and explain.
 1. `C check` → on failure, guide the user by the error (API disabled, IP not allowed, token, wrong network/VPN).
    **No configuration:** ask once whether Coolify is already installed with API access, a token and a GitHub
    App. Yes → ask for the panel URL and base domain (and `user@host`, the reserved webhook subdomain) and run
@@ -90,7 +94,9 @@ plugin.
 ### B · Analysis
 - Given `owner/repo` not present locally: `gh repo clone owner/repo <projects_dir>/<repo>` (`projects_dir` comes
   from `config.json`; new projects are also created there).
-- `G state <path>`. Not a repository (`is_repo` false): `G init <path>` first — it creates `.gitignore` if missing
+- `G state <path>`. Not a repository (`is_repo` false) with `parent_warning`: ask the user whether the repository
+  is the parent folder (then follow «Repositories with several apps» from it) or this folder alone.
+  Not a repository: `G init <path>` first — it creates `.gitignore` if missing
   (dependencies, build caches, `.env*`, `db.sqlite3`, `staticfiles/`, `media/`, and the build output folder listed
   in `ignored_build_output` when the image builds it) so the analysis below sees the project as it would be pushed. Git is only
   ever used through `repo.py`, never directly.
@@ -132,6 +138,9 @@ plugin.
   `<path>` = the project folder.
 - No GitHub remote yet: the owner is `gh api user -q .login` unless the user names an organisation; the repository
   is created by the user at push time (see «Pushes»).
+- `monorepo.kind` = `apps`, or `git.subdir` not empty: see «Repositories with several apps» before going on. At
+  the repository root the «several apps in this repository» blocker is expected: do not stop for it; the blocker
+  rule below applies to each app folder's own analysis.
 - If there are **blockers**, stop here and explain them together with what would fix them.
 - If the app uses paid services and has no login, access stays public by default **but** the summary must propose
   protecting it (basic auth on its domain, step E6) and the user must choose explicitly. Mention that an API
@@ -159,11 +168,13 @@ plugin.
    Unless `stack.local_env` provides a database, an app that needs a database (`databases` not empty) has
    none locally: probe only routes that do not use it. A failure caused only by the missing database (connection refused / unknown host in `container_logs`) is
    **not** a build failure: report «build OK, start needs the database» and do not apply rule 8.
-3. On failure: read `build_error` / `container_logs`, fix **only** deployment files and repeat (rule 8). To
+3. On failure: read `build_error` / `container_logs`, fix **only** deployment files and repeat (rule 8). A build
+   error about a file outside the app folder (`../shared`, a missing sibling package) is the project's: stop and
+   explain (the build only sees the folder; no rule-8 retries). To
    change a value from the analysis, `P <path> --var KEY=value --overwrite`.
 4. If it works, commit. A repository just created by `G init` has no commits yet: commit the whole project,
-   deployment files included (`G commit <path> -m "chore: initial commit" --all`; allowed under rule 6, it changes
-   no code). An existing repository: only the deployment files,
+   deployment files included (`G commit <repo> -m "chore: initial commit" --all`, `<repo>` = `git.root`, the same
+   as `<path>` for a single app; allowed under rule 6, it changes no code). An existing repository: only the deployment files,
    `G commit <path> -m "build: deploy to Coolify (…)" --files Dockerfile .dockerignore [nginx.conf] [coolify_settings.py] [config/trustedproxy.php]`.
    If `G commit` returns `secrets`, stop (rule 3).
 
@@ -172,6 +183,8 @@ Check the domain with `C domain-check <name>` and present exactly this block (tr
 ```
 App:          <name>  (<framework>, <template or own Dockerfile>)
 Repo:         <owner/repo> · branch <branch> · <what must be pushed: commits / new repo (+ give the GitHub App access) / nothing>
+              (app folder: «<owner/repo> · <folder>/ · redeploys only when <folder>/ changes»)
+Project:      <project name> (new | shared with <apps of `C status` with the same `repo`>)
 Domain:       https://<name>.<base_domain>   (<available ✔ | reason>)
 Access:       public | protected with user and password
 Database:     no | PostgreSQL 17 (new, private) | external (DATABASE_URL supplied by you, with the variables)
@@ -202,11 +215,13 @@ that file (never in the chat). Wait for their «yes».
    `to_push` is empty. **New repository:** the GitHub App only sees the repositories it was installed on, so ask
    the user to add it: GitHub → *Settings → Applications → Installed GitHub Apps → <the Coolify app> → Configure
    → Repository access → add <owner>/<name> → Save*. Wait for their «done».
-2. `C create-project <name>` → `project_uuid`.
+2. `C create-project <project>` → `project_uuid` (`<project>` = `<name>`; for an app folder, the repository folder
+   name, shared by every app of the repository).
 3. `C create-app --project <uuid> --repo <owner/repo> --branch <branch> --port <port> --domain <name> --name <name>`
    (+ `--cpus`/`--memory` to override defaults, `--no-autodeploy` if chosen, `--env-domain <KEY>` for each key of
    `stack.runtime_env`, `--env-url <KEY>` for each key of `stack.url_env`, `--env-generate <KEY>` for each entry of
-   `stack.generated_env`, as written, e.g. `APP_KEY:laravel`) → `app_uuid`. If `env_errors` is not empty the app
+   `stack.generated_env`, as written, e.g. `APP_KEY:laravel`; app folder: `--base-dir /<folder> --watch-paths
+   '<folder>/**'`, with `<folder>` = `git.subdir` without its final `/`) → `app_uuid`. If `env_errors` is not empty the app
    **was** created: retry once the failed keys with `C env-domain`, `C env-url` or `C env-generate <name> <KEY…>`
    (for `env-generate`, use the `key` of `env_errors` as it is, with its format, e.g. `APP_KEY:laravel`); if it fails again, stop and explain (nothing to undo; the variable can be
    set later the same way).
@@ -256,6 +271,26 @@ copied); to use the admin, create a user with `python manage.py createsuperuser`
 Coolify (it asks for the password there, never in the chat). Laravel: the database is empty too; users sign up
 through the app, or are created with `php artisan tinker` in the same *Terminal* tab. The local registry (`apps.json`) is updated by the scripts.
 
+### Repositories with several apps
+A repository whose root holds no app and whose subfolders do (`backend/` + `frontend/`, `api/` + `web/`…). Each app
+is its own Coolify app built from its folder, with its own domain, in one Coolify project per repository.
+- At the repository root, `monorepo.apps` lists each app folder (`path`, `framework`, `template`,
+  `existing_dockerfile`, `databases`, `deployable`, `blockers`, `suggested_name` = `<repository>-<folder>`). Show
+  it as a table and ask which to deploy (one, several or all the deployable ones). This choice is not rule 1's
+  confirmation: each app still gets its own step D. When a frontend and the API it calls are both chosen, say now
+  that the API must allow the frontend's domain (CORS), so it can be fixed before the API is deployed.
+- Then, **one app after another** (APIs and backends first), run steps B–G with `<path>` = the app folder:
+  `A`, `P`, `L` and `G commit --files` work on the folder; `G init`, `A --secrets`, the initial commit and pushes
+  on the repository (`<repo>` = `git.root`). Step E1 (push, new repository, GitHub App access) usually only applies
+  to the first app. If an app fails, **stop**: say which apps were deployed, which failed and which were not started.
+- In step D, when the app reads a public variable that holds the URL of a sibling API (`VITE_API_URL`,
+  `NEXT_PUBLIC_API_URL`…), tell the user its value for the secrets file: `https://<sibling's domain>` — read from
+  `C status` (the app with the same `repo` and the sibling's `base_dir`; ask if there is none) — plus the path its
+  `.env.example` value has (e.g. `/api`). Add to «Warnings»: «the API must allow
+  https://<this app's domain> (CORS)»; change the API's code only if the user asks (rule 6).
+- `git.root` is shown in step B when it is not the folder the user named (the folder may be inside a repository
+  they did not expect).
+
 ---
 
 ## Other modes
@@ -265,21 +300,22 @@ through the app, or are created with `php artisan tinker` in the same *Terminal*
 | `protect <app>` / `unprotect <app>` | Confirm with the user → `C protect <app> [--user <user>]` (or `--off`) → `C deploy <app>` → `C wait …`. The credentials stay in `secrets/<app>.access` |
 | `status` | `C status` → table: app, status, domain, auto-deploy (`C last-deployment <app>` if useful). Every command accepts the app's name (from `apps.json` or from the server) or its uuid; if a name is ambiguous, use the uuid |
 | `logs <app>` | `C logs <app>` and `C last-deployment <app>`; summarize errors. `C logs` shows the **running** container: if the last deployment `failed`, read its log as in the next row |
-| «my change does not show», «it did not update» | `G state <path>`: `to_push` not empty → the change was never pushed (see «Pushes»). Otherwise `C last-deployment <app>`: `failed` → `C wait <deployment_uuid> --lines 120` and diagnose as in step E8 (migration, `optimize`, database URL, build error; the previous version is still running); `in_progress`/`queued` → `C wait <deployment_uuid>`; no deployment after the push → auto-deploy is off or the webhook did not arrive: `C deploy <app>` (the GitHub App webhook can be checked in Coolify). Only then suggest a hard refresh of the browser |
-| `update <app>` | `G state <path>`; local changes → `G commit <path> -m "<message>" --all` → push by the user → `C last-deployment <app>` until the new commit shows up → `C wait …` → `V …`. Without auto-deploy: `C deploy <app>` |
+| «my change does not show», «it did not update» | `G state <path>`: `to_push` not empty → the change was never pushed (see «Pushes»). Otherwise `C last-deployment <app>`: `failed` → `C wait <deployment_uuid> --lines 120` and diagnose as in step E8 (migration, `optimize`, database URL, build error; the previous version is still running); `in_progress`/`queued` → `C wait <deployment_uuid>`; no deployment after the push → if the push only changed files outside the app's folder (an app of a repository with several apps only redeploys when its folder changes; files at the repository root do not count), say that this is expected and offer `C deploy <app>`; otherwise auto-deploy is off or the webhook did not arrive: `C deploy <app>` (the GitHub App webhook can be checked in Coolify). Only then suggest a hard refresh of the browser |
+| `update <app>` | `G state <path>`; local changes → `G commit <path> -m "<message>" --all` (from an app folder `--all` commits, and scans, the whole repository: say so) → push by the user → `C last-deployment <app>` until the new commit shows up → `C wait …` → `V …`. Without auto-deploy: `C deploy <app>` |
 | `env <app>` | `C env-list <app>` (names only). To add or change values: `C env-template <app> <KEY…>` if new keys → the user edits `secrets/<app>.env` → `C env-push <app> <file> --only <KEY…>` with **only** the keys added or changed (pushing the whole file would overwrite values changed in the panel since) → `C deploy <app>` → `C wait <deployment_uuid>` → `V https://<domain>`. To delete one: confirm with the user → `C env-delete <app> <KEY> --confirmed`. Do not use `env-set` with a value on the command line |
 | `rollback <app>` | `C rollback <app>` lists images (read-only, no question): `current` is the running tag, `images[]` have `tag`, `created_at`, `is_current`; «the previous version» = the newest image that is not current. No image besides the current one → say a rollback is not possible and offer an `update` with a `git revert` made by the user. Otherwise show them, **ask which one** and confirm → `C rollback <app> --image <tag> --confirmed` → `C wait <deployment_uuid>` → `V https://<domain>` (`--protected` if it has a user and password). Domain and auto-deploy come from `C status` (`domains`, `autodeploy`) when the app is not in `apps.json`. If auto-deploy is on, warn that the next push replaces the rollback. Django and Laravel: a rollback restores the code, not the database: migrations already applied stay |
-| `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. If the database or project is not in `apps.json`, the script refuses before deleting anything: tell the user and offer to delete only the app. The script watches the server until Coolify's cleanup is done before removing the project; if `deleted.warning` appears, the project was kept: tell the user. It also deletes the app's local `secrets/<app>.env` and `.access` (listed in `deleted.local_files`) |
+| `decommission <app>` | Explain what will be deleted (app, and the database if any: **offer a backup first**). After an explicit «yes»: `C decommission <app> --confirmed [--with-db] [--with-project]`. If the database or project is not in `apps.json`, the script refuses before deleting anything: tell the user and offer to delete only the app. The script watches the server until Coolify's cleanup is done before removing the project; if `deleted.warning` appears, the project was kept: tell the user. Before asking, check `C status` for other apps with the same `repo`: say the project stays while they are in it, and name any that call this app (a frontend would lose its API). After it: `deleted.project_kept` = other apps of the repository are still in the project (it goes with the last one); `deleted.project_not_deleted` = Coolify refused (something else is still in the project): tell the user It also deletes the app's local `secrets/<app>.env` and `.access` (listed in `deleted.local_files`) |
 
 ---
 
 ## Pushes (done by the user)
 
 Give the exact command, ready to paste with `!`:
-- New repository (private by default): `! gh repo create <owner>/<name> --private --source=<path> --remote=origin --push`
-- Pending commits: `! git -C <path> push`
+- New repository (private by default): `! gh repo create <owner>/<name> --private --source=<repo> --remote=origin --push`
+  (`<repo>` = `git.root`; for an app folder the repository is named after `<repo>`'s folder, not after the app)
+- Pending commits: `! git -C <repo> push`
 
-Before handing it over: `A <path> --secrets` clean and `G state <path>` → tell the user what `to_push` lists (for
+A push publishes the whole repository. Before handing it over: `A <repo> --secrets` clean and `G state <path>` → tell the user what `to_push` lists (for
 a new repository, every commit).
 
 ## Known issues

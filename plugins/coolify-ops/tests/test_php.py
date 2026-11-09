@@ -302,9 +302,11 @@ def test_sail_with_four_space_indentation(tmp_path):
     assert r["deployable"] and any("Sail" in w for w in r["warnings"])
 
 
-def test_four_space_multi_service_compose_is_still_blocked(tmp_path):
-    make(tmp_path, {"index.html": "<h1>x</h1>", "compose.yaml": "services:\n    web:\n        image: a\n    db:\n        image: b\n"})
-    assert not analyze.analyze(tmp_path)["deployable"]
+def test_four_space_compose_with_two_services_built_here_is_blocked(tmp_path):
+    make(tmp_path, {"index.html": "<h1>x</h1>", "compose.yaml": "services:\n    web:\n        build: .\n    worker:\n"
+                    "        build:\n            context: .\n    db:\n        image: b\n"})
+    r = analyze.analyze(tmp_path)
+    assert not r["deployable"] and "2 services built from the project folder (web, worker)" in " ".join(r["blockers"])
 
 
 def test_compose_counts_only_services():

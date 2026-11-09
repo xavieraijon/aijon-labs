@@ -18,7 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from analyze import analyze, project_files, scan_secrets  # noqa: E402
+from analyze import analyze, parent_apps_warning, project_files, repo_root, scan_secrets  # noqa: E402
 
 GITIGNORE = """# Added by coolify-ops (deploy-app)
 node_modules/
@@ -67,7 +67,10 @@ def cmd_state(a) -> dict:
     if not path.is_dir():
         raise Error(f"Folder {path} does not exist")
     if not is_repo(path):
-        return {"ok": True, "path": str(path), "is_repo": False, "has_gitignore": (path / ".gitignore").exists()}
+        res = {"ok": True, "path": str(path), "is_repo": False, "has_gitignore": (path / ".gitignore").exists()}
+        if warning := parent_apps_warning(path):  # the repository may have to be the parent folder
+            res["parent_warning"] = warning
+        return res
     remote = git(path, "remote", "get-url", "origin", check=False)
     remote = re.sub(r"//[^/@]+@", "//", remote)  # never print credentials stored in the URL
     m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", remote)
@@ -77,7 +80,8 @@ def cmd_state(a) -> dict:
     rng = ["@{u}..HEAD"] if has_upstream else (["HEAD"] if has_commits else [])
     to_push = git(path, "log", "--oneline", *rng).splitlines() if rng else []
     status = git(path, "status", "--porcelain")
-    return {"ok": True, "path": str(path), "is_repo": True, "branch": git(path, "branch", "--show-current"),
+    top = repo_root(path)[0]
+    return {"ok": True, "path": str(path), "is_repo": True, "root": str(top), "branch": git(path, "branch", "--show-current"),
             "remote": m.group(1) if m else (remote or None), "remote_is_github": bool(m),
             "has_upstream": has_upstream, "has_commits": has_commits,
             "to_push": to_push, "uncommitted": len(status.splitlines()) if status else 0,
@@ -100,24 +104,36 @@ def cmd_init(a) -> dict:
 
 
 def build_output(path: Path) -> list[str]:
-    """Top folder of the build output when the image builds it (a local build may hold inlined build-time values).
+    """Top folder of the build output when the image builds it (a local build may hold inlined build-time values),
+    for the project or, in a repository with several apps, for each app folder.
 
     Not for plain static sites (static-nginx copies the folder as is: a «build/» there may hold real files)."""
-    stack = analyze(path).get("stack") or {}
-    build_dir = stack.get("build_dir") or ""
-    top = build_dir.split("/")[0]
-    if stack.get("template") in (None, "static-nginx") or not top or top in {".", ".."}:
-        return []
-    line = f"{top}/"
-    return [] if line in GITIGNORE.splitlines() else [line]
+    r = analyze(path)
+    monorepo = r.get("monorepo") or {}
+    stacks = [(f"{a['path']}/", a) for a in monorepo.get("apps", [])] if monorepo.get("kind") == "apps" \
+        else [("", r.get("stack") or {})]
+    lines = []
+    for prefix, stack in stacks:
+        top = (stack.get("build_dir") or "").split("/")[0]
+        if stack.get("template") in (None, "static-nginx") or not top or top in {".", ".."}:
+            continue
+        line = f"{prefix}{top}/"
+        if line not in GITIGNORE.splitlines() and line not in lines:
+            lines.append(line)
+    return lines
 
 
 def cmd_commit(a) -> dict:
     path = Path(a.path).expanduser().resolve()
     if not is_repo(path):
         raise Error("Not a git repository: run «repo.py init» first")
-    # Same view as a push: tracked files plus untracked files not ignored
-    secrets = scan_secrets(path, project_files(path))
+    # Same view as a push (tracked plus untracked-not-ignored files) of what will be staged: the whole repository with
+    # --all (git add --all stages it even from an app folder), else the folder; plus anything already staged anywhere
+    top, subdir = repo_root(path)
+    path = top / subdir  # git's spelling of the path, so every file is relative to top
+    files = set(project_files(top if a.all else path))
+    files |= {top / f for f in git(top, "diff", "--cached", "--name-only").splitlines() if (top / f).is_file()}
+    secrets = scan_secrets(top, sorted(files))
     if secrets:
         return {"ok": False, "error": "possible secrets in files that would be committed; nothing was committed",
                 "secrets": secrets}

@@ -12,8 +12,8 @@ is required by `GET /applications/{uuid}/logs` (`routes/api.php`); the scripts n
 | `status` | `GET /applications`, `GET /applications/{uuid}` (settings), `GET /databases` |
 | any `<app>` argument | a name missing from `apps.json` is looked up in `GET /applications` (exact `name`) |
 | `domain-check` | `GET /applications` (`fqdn` field) |
-| `create-project` | `GET /projects`, `POST /projects` |
-| `create-app` | `POST /applications/private-github-app` (`build_pack=dockerfile`, `ports_exposes`, `domains`, `limits_*`, `is_auto_deploy_enabled`, `health_check_enabled=false`, `instant_deploy=false`); with `--env-domain KEY` it then sets `KEY=<domain>` as a runtime variable, with `--env-url KEY` `KEY=https://<domain>`, with `--env-generate KEY[:FORMAT]` a random secret (as `env-generate`), and reports failures in `env_errors` without losing `app_uuid` |
+| `create-project` | `GET /projects`, `POST /projects` (an existing project with the same name is reused: `created: false`) |
+| `create-app` | `POST /applications/private-github-app` (`build_pack=dockerfile`, `ports_exposes`, `domains`, `limits_*`, `is_auto_deploy_enabled`, `health_check_enabled=false`, `instant_deploy=false`; `--base-dir /<folder>` → `base_directory`, the build context and the folder `--dockerfile` is relative to; `--watch-paths GLOB` (repeatable) → `watch_paths`, one glob per line, relative to the repository root, `!` excludes; paths are checked against Coolify's own pattern before any call); with `--env-domain KEY` it then sets `KEY=<domain>` as a runtime variable, with `--env-url KEY` `KEY=https://<domain>`, with `--env-generate KEY[:FORMAT]` a random secret (as `env-generate`), and reports failures in `env_errors` without losing `app_uuid` |
 | `env-domain <app> KEY…` | `GET /applications/{uuid}` (`fqdn`) then `POST/PATCH /applications/{uuid}/envs` with the domain host |
 | `env-url <app> KEY…` | Same as `env-domain`, with the value `https://<domain host>` (e.g. Laravel `APP_URL`) |
 | `env-generate <app> KEY[:FORMAT]…` | `GET /applications/{uuid}/envs`; for each key not present, `POST /applications/{uuid}/envs` with a random value (`is_shown_once`, runtime only). Formats: none (`token_urlsafe(50)`) or `laravel` (`base64:` + 32 random bytes, as `php artisan key:generate`). Existing keys are kept, never rotated |
@@ -27,7 +27,7 @@ is required by `GET /applications/{uuid}/logs` (`routes/api.php`); the scripts n
 | `last-deployment` | `GET /deployments/applications/{uuid}?take=1` |
 | `logs` | `GET /applications/{uuid}/logs?lines=…` |
 | `rollback` | `GET /applications/{uuid}/rollback-images` (→ `current`, `images[]` with `tag`, `created_at`, `is_current`, `source`), `POST /applications/{uuid}/rollback` with body `{"commit": "<tag>"}` only — any other field is rejected with 422 (→ `deployment_uuid`) |
-| `decommission` | `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, `GET` until 404, server watched over ssh until the cleanup job is done, then `DELETE /projects/{uuid}` |
+| `decommission` | `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, `GET` until 404, server watched over ssh until the cleanup job is done, then `DELETE /projects/{uuid}` — skipped (`project_kept`) while another app in `apps.json` uses the same project |
 
 Notes:
 - A database's internal URL is `postgres://user:password@<database-uuid>:5432/<db>`: the host is the uuid and only
@@ -38,3 +38,7 @@ Notes:
 - The applications list has no `settings`; auto-deploy (`settings.is_auto_deploy_enabled`) needs the detail call.
 - Deletions run in the background (`DeleteResourceJob`). The API answers 404 *before* that job runs, so a 404 does
   not mean the server is clean. Deleting the parent project too early breaks the job (verified on v4.6.0).
+- Watch paths (verified on v4.6.0): a push redeploys the app only if a changed file matches one of the globs
+  (`*`, `**`, `?`, `[…]`, `!` exclusion, the last match wins). With no watch paths, or when the push carries no file
+  list, every push deploys. Manual `deploy` calls ignore them.
+- `DELETE /projects/{uuid}` answers 400 «Project has resources» while anything is left in the project.

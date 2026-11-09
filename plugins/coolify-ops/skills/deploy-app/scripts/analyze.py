@@ -53,6 +53,14 @@ BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".z
                    ".mp3", ".mp4", ".lock"}
 LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
 MANIFESTS = ("package.json", "requirements.txt", "pyproject.toml", "composer.json")
+# Prefixes a bundler/framework inlines into the browser bundle at build time (kept in sync with coolify.py's copy)
+PUBLIC_PREFIXES = ("NEXT_PUBLIC_", "VITE_", "PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_")
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+# Folders that are never an app of a repository with several apps
+NOT_APP_DIRS = {"docs", "examples", "tests", "e2e", "cypress", "infra", "scripts", "tools", "bin", "docker", "deploy",
+                "deployment", "k8s", "kubernetes", "helm", "charts"}
+NOT_APP_HTML_DIRS = {"src", "public", "templates", "static", "assets"}  # an index.html there is a build input
+APP_PATH = re.compile(r"[A-Za-z0-9._~@+/-]+")  # what Coolify accepts in base_directory
 
 
 # ---------------------------------------------------------------- helpers
@@ -75,6 +83,12 @@ def read(path: Path) -> str:
         return ""
 
 
+def repo_root(path: Path) -> tuple[Path, str]:
+    """(repository root as git spells it, path of the folder inside it like «backend/»); (path, "") without git."""
+    top = git(path, "rev-parse", "--show-toplevel")
+    return (Path(top).resolve(), git(path, "rev-parse", "--show-prefix")) if top else (path, "")
+
+
 def project_files(root: Path) -> list[Path]:
     """Files that would be pushed: git-tracked plus untracked-not-ignored if it is a repo; otherwise a plain walk."""
     out = git(root, "ls-files", "--cached", "--others", "--exclude-standard")
@@ -82,6 +96,20 @@ def project_files(root: Path) -> list[Path]:
         return [root / l for l in out.splitlines() if (root / l).is_file()]
     return [p for p in root.rglob("*")
             if p.is_file() and not any(part in IGNORED_DIRS for part in p.relative_to(root).parts)]
+
+
+def with_build_args(dockerfile: str, keys: list[str]) -> str:
+    """Add «ARG KEY» after every FROM line: Coolify exports build-time variables to the build host's shell and
+    passes «--build-arg KEY» (no value, read from that shell), but Docker only exposes a build arg to RUN
+    commands when the Dockerfile declares it with ARG — otherwise it is silently dropped."""
+    if not keys:
+        return dockerfile
+    out = []
+    for line in dockerfile.splitlines():
+        out.append(line)
+        if re.match(r"\s*FROM\s", line, re.I):
+            out += [f"ARG {k}" for k in keys]
+    return "\n".join(out) + "\n"
 
 
 def major(version: str | None) -> int | None:
@@ -142,39 +170,143 @@ def env_vars_used(root: Path, files: list[Path]) -> dict:
     return {"example": example, "in_code": sorted((in_code | build_time) - ignored), "build_time": sorted(build_time)}
 
 
-def compose_services(text: str) -> list[str]:
-    """Service names of a compose file: 2-space keys inside the top-level services: block only."""
+def compose_blocks(text: str) -> dict[str, str]:
+    """Service name → its body, for the top-level services: block only (2-space keys, 4 in Laravel Sail…)."""
     m = re.search(r"^services:[ \t]*$(.*?)(?=^\S|\Z)", text, re.M | re.S)
-    indent = re.search(r"^([ \t]+)\S", m.group(1), re.M) if m else None  # 2 spaces, 4 (Laravel Sail)…
+    indent = re.search(r"^([ \t]+)\S", m.group(1), re.M) if m else None
     if not indent:
+        return {}
+    parts = re.split(rf"^{indent.group(1)}([A-Za-z0-9_.-]+):[ \t]*$", m.group(1), flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
+def compose_services(text: str) -> list[str]:
+    return list(compose_blocks(text))
+
+
+def compose_builds(text: str) -> dict[str, str | None]:
+    """Service name → folder it builds from, relative to the compose file («» = that folder); None = image only."""
+    out: dict[str, str | None] = {}
+    for name, body in compose_blocks(text).items():
+        b = re.search(r"^\s+build:[ \t]*([^#\n]*)", body, re.M)
+        if not b:
+            out[name] = None
+            continue
+        value = b.group(1).strip().strip("'\"")
+        if not value:  # long form: build: {context: …}; no context means the compose folder
+            c = re.search(r"^\s+context:[ \t]*([^#\n]+)", body, re.M)
+            value = c.group(1).strip().strip("'\"") if c else "."
+        value = re.sub(r"^(\./)+", "", value.rstrip("/") or ".")
+        out[name] = "" if value == "." else value
+    return out
+
+
+def pnpm_workspace_packages(text: str) -> list[str]:
+    """Entries of the packages: list of pnpm-workspace.yaml (block or flow form); [] when there is no such key."""
+    m = re.search(r"^packages:[ \t]*(.*)$", text, re.M)
+    if not m:
         return []
-    return re.findall(rf"^{indent.group(1)}([A-Za-z0-9_.-]+):\s*$", m.group(1), re.M)
+    rest = m.group(1).split("#")[0].strip()
+    if rest.startswith("["):
+        items = rest.strip("[]").split(",")
+    else:
+        block = re.match(r"((?:^[ \t]+-.*\n?|^[ \t]*(?:#.*)?\n)*)", text[m.end() + 1:], re.M)
+        items = re.findall(r"^[ \t]+-[ \t]*([^#\n]*)", block.group(1) if block else "", re.M)
+    return [i.strip().strip("'\"") for i in items if i.strip().strip("'\"")]
 
 
-def detect_monorepo(root: Path, files: list[Path], laravel: bool = False) -> list[str]:
-    reasons = [m for m in ("nx.json", "turbo.json", "pnpm-workspace.yaml", "lerna.json", "rush.json")
-               if (root / m).exists()]
-    pkg = root / "package.json"
-    if pkg.exists():
-        try:
-            if json.loads(read(pkg)).get("workspaces"):
-                reasons.append("package.json with workspaces")
-        except json.JSONDecodeError:
-            pass
-    packages = {f.parent for f in files if f.name in MANIFESTS and f.parent != root}
-    root_has_manifest = any((root / n).exists() for n in MANIFESTS)
-    if packages and (len(packages) > 1 or not root_has_manifest):
-        names = sorted(str(p.relative_to(root)) for p in packages)[:5]
-        reasons.append("several projects in subfolders: " + ", ".join(names))
-    for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
-        dc = root / name
-        if dc.exists():
-            services = compose_services(read(dc))
-            if laravel and "laravel.test" in services:  # Laravel Sail: local development only
-                continue
-            if len(services) > 1:
-                reasons.append(f"{name} with {len(services)} services ({', '.join(services[:5])})")
+def workspace_reasons(top: Path) -> list[str]:
+    """Signs that the repository is a workspace (shared lockfile and packages): read at the repository root."""
+    reasons = [m for m in ("nx.json", "turbo.json", "lerna.json", "rush.json") if (top / m).exists()]
+    if [p for p in pnpm_workspace_packages(read(top / "pnpm-workspace.yaml")) if p not in {".", "./"}]:
+        reasons.append("pnpm-workspace.yaml with packages")
+    try:
+        if json.loads(read(top / "package.json") or "{}").get("workspaces"):
+            reasons.append("package.json with workspaces")
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    if re.search(r"^\[tool\.uv\.workspace\]", read(top / "pyproject.toml"), re.M):
+        reasons.append("uv workspace in pyproject.toml")
     return reasons
+
+
+def root_app(root: Path) -> bool:
+    return any((root / n).exists() for n in (*MANIFESTS, "Dockerfile", "index.html"))
+
+
+def skipped_folder(rel: Path) -> bool:
+    return any(p in IGNORED_DIRS or p in NOT_APP_DIRS or p.startswith(".") for p in rel.parts)
+
+
+def app_folders(root: Path, files: list[Path]) -> tuple[list[str], list[str]]:
+    """Folders (up to two levels deep) that look like apps of their own, and compose files that block.
+
+    A manifest or a Dockerfile makes a folder an app; an index.html only when no manifest is in it or above it and
+    it is not a sources/templates folder. Compose files add the folders their services build from."""
+    rels = [f.relative_to(root) for f in files]
+    found = {r.parent for r in rels if r.name in (*MANIFESTS, "Dockerfile")}
+    for r in rels:
+        d = r.parent
+        if r.name == "index.html" and d.name not in NOT_APP_HTML_DIRS and not any(
+                (root / a / m).exists() for a in (d, *d.parents) for m in MANIFESTS):
+            found.add(d)
+    blocking = []
+    for name in COMPOSE_FILES:
+        builds = compose_builds(read(root / name))
+        from_root = [s for s, b in builds.items() if b == ""]
+        if len(from_root) > 1:
+            blocking.append(f"{name} with {len(from_root)} services built from the project folder "
+                            f"({', '.join(from_root[:5])})")
+        found |= {Path(b) for b in builds.values() if b and not b.startswith("/") and ".." not in Path(b).parts}
+    found = {d for d in found if 1 <= len(d.parts) <= 2 and not skipped_folder(d)}
+    apps = sorted(str(d) for d in found if not any(a in found for a in d.parents))
+    return apps, blocking
+
+
+def detect_monorepo(root: Path, files: list[Path], top: Path | None = None) -> dict | None:
+    """How the folder holds several apps, if it does: workspaces, app folders, both a root app and app folders."""
+    reasons = workspace_reasons(root) + (workspace_reasons(top) if top and top != root else [])
+    if reasons:
+        return {"kind": "workspaces", "reasons": reasons}
+    apps, blocking = app_folders(root, files)
+    if blocking:
+        return {"kind": "services", "reasons": blocking}
+    if not apps or (root_app(root) and len(apps) == 1):
+        return None
+    return {"kind": "apps" if not root_app(root) else "mixed", "apps": apps}
+
+
+def outside_references(root: Path) -> list[str]:
+    """Dependencies that point outside the folder: the image is built from the folder alone."""
+    found = []
+    try:
+        pkg = json.loads(read(root / "package.json") or "{}")
+        for section in ("dependencies", "devDependencies", "optionalDependencies"):
+            for dep, value in (pkg.get(section) or {}).items():
+                if isinstance(value, str) and re.match(r"(file:|link:|portal:)?\.\./|workspace:", value):
+                    found.append(f"{dep} ({value})")
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    for f in sorted(root.glob("requirements*.txt")):
+        found += [line.strip() for line in read(f).splitlines() if re.match(r"\s*(-e\s+)?(file:)?\.\./", line)]
+    found += re.findall(r"""path\s*=\s*["'](\.\./[^"']*)""", read(root / "pyproject.toml"))
+    return found[:5]
+
+
+def parent_apps_warning(root: Path) -> str | None:
+    """No git yet: siblings with their own manifest may belong to the same repository (direct subfolders of a parent
+    that looks like a repository: compose file, .gitignore, README or Makefile)."""
+    parent = root.parent
+    looks_like_repo = any((parent / n).exists() for n in (*COMPOSE_FILES, ".gitignore", "README.md", "README", "Makefile"))
+    if parent == Path.home() or root_app(parent) or not looks_like_repo:  # a plain folder of projects is not a repo
+        return None
+    siblings = sorted(d.name for d in parent.iterdir()
+                      if d.is_dir() and d != root and not d.name.startswith(".") and d.name not in NOT_APP_DIRS
+                      and any((d / m).exists() for m in (*MANIFESTS, "Dockerfile")))
+    if not siblings:
+        return None
+    return (f"{parent} holds other apps ({', '.join(siblings[:5])}) and nothing is a git repository yet: if they belong "
+            f"to one repository, analyse {parent} instead; otherwise this folder becomes its own repository")
 
 
 def strip_comments(text: str) -> str:
@@ -502,18 +634,31 @@ def infer_databases(stack: dict, names: set, manifests: str) -> list[str]:
     return dbs
 
 
+def app_summary(root: Path, rel: str) -> dict:
+    r = analyze(root / rel)
+    stack = r.get("stack") or {}
+    name = re.sub(r"-+", "-", re.sub(r"[^a-z0-9-]", "-", f"{root.name}-{rel}".lower())).strip("-")[:63].strip("-")
+    return {"path": rel, "suggested_name": name,
+            "language": stack.get("language"), "framework": stack.get("framework"), "template": stack.get("template"),
+            "existing_dockerfile": bool(stack.get("existing_dockerfile")), "build_dir": stack.get("build_dir"),
+            "databases": r.get("databases"),
+            "deployable": r["deployable"], "blockers": r["blockers"]}
+
+
 def analyze(root: Path) -> dict:
     root = root.resolve()
     if not root.is_dir():
         return {"ok": False, "error": f"Folder {root} does not exist"}
+    # --- git (the folder may be an app inside a repository: git.root is the repository, git.subdir the app)
+    top, subdir = repo_root(root)
+    root = top / subdir  # git's spelling of the path (case-insensitive file systems: «personal» vs «Personal»)
     files = project_files(root)
-    res: dict = {"ok": True, "path": str(root),
-                 "suggested_name": re.sub(r"[^a-z0-9-]", "-", root.name.lower()).strip("-")}
+    res: dict = {"ok": True, "path": str(root)}
     blockers: list[str] = []
     warnings: list[str] = []
-
-    # --- git
-    if (root / ".git").exists():
+    name = f"{top.name}-{subdir}" if subdir else root.name
+    res["suggested_name"] = re.sub(r"-+", "-", re.sub(r"[^a-z0-9-]", "-", name.lower())).strip("-")[:63].strip("-")
+    if git(root, "rev-parse", "--is-inside-work-tree") == "true":
         remote = git(root, "remote", "get-url", "origin")
         remote = re.sub(r"//[^/@]+@", "//", remote)  # never print credentials stored in the URL
         m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", remote)
@@ -522,18 +667,41 @@ def analyze(root: Path) -> dict:
         res["git"] = {"remote": m.group(1) if m else (remote or None), "branch": git(root, "rev-parse", "--abbrev-ref", "HEAD"),
                       "uncommitted_changes": len(status.splitlines()) if status else 0,
                       "unpushed_commits": int(ahead) if ahead.isdigit() else None,
-                      "has_upstream": bool(ahead)}
+                      "has_upstream": bool(ahead), "root": str(top), "subdir": subdir}
         if remote and not m:
             blockers.append("the remote is not on GitHub (only GitHub repositories are supported)")
+        if top == Path.home().resolve():
+            blockers.append("the folder is inside a git repository at your home folder: use a project folder with "
+                            "its own repository")
+        if subdir and not APP_PATH.fullmatch(subdir.rstrip("/")):
+            blockers.append(f"the folder {subdir.rstrip('/')} has characters Coolify does not accept in a base "
+                            "directory (letters, digits, . _ - ~ @ + only): rename it")
     else:
         res["git"] = None
+        if warning := parent_apps_warning(root):
+            warnings.append(warning)
 
     # --- stack
     php = php_framework(root)
-    monorepo = detect_monorepo(root, files, laravel=php == "laravel")
+    monorepo = detect_monorepo(root, files, top if subdir else None)
     if monorepo:
         res["monorepo"] = monorepo
-        blockers.append("monorepo or several services (" + "; ".join(monorepo) + "): not supported yet")
+        if monorepo["kind"] == "workspaces":
+            blockers.append("workspaces (" + "; ".join(monorepo["reasons"]) + ") are not supported: the apps share the "
+                            "root lockfile and packages, so they cannot be built from their own folders")
+        elif monorepo["kind"] == "services":
+            blockers.append("several services (" + "; ".join(monorepo["reasons"]) + "): not supported")
+        elif monorepo["kind"] == "mixed":
+            blockers.append("an app at the root plus several app folders (" + ", ".join(monorepo["apps"][:5])
+                            + "): move the root app into its own folder")
+        else:
+            monorepo["apps"] = [app_summary(root, a) for a in monorepo["apps"]]
+            blockers.append("several apps in this repository (" + ", ".join(a["path"] for a in monorepo["apps"][:5])
+                            + "): deploy each from its folder")
+    outside = outside_references(root)
+    if outside:
+        blockers.append(f"imports code from outside its folder ({', '.join(outside)}): the build only sees this folder; "
+                        "move that code inside it or publish it as a package")
     if is_django(root):  # wins over a package.json (Tailwind, django-vite…)
         res["stack"] = analyze_python(root, files)
         pkg_scripts = {}
@@ -604,6 +772,12 @@ def analyze(root: Path) -> dict:
         warnings.append("variables imported from $env/static are needed at build time ("
                         + ", ".join(res["build_time_env"]) + "): upload them with env-push --buildtime, and pass test "
                         "values with --build-env to the local check")
+    # Names a bundler inlines into the browser bundle (VITE_*…) are build-time too, even though the code never
+    # says so explicitly; env-push already uploads them with is_buildtime=true. prepare.py declares them with ARG
+    # so the Dockerfile actually receives them (Coolify drops an undeclared build-arg silently).
+    public_env = {k for k in set(res["env_vars"]["in_code"]) | set(res["env_vars"]["example"])
+                 if k.startswith(PUBLIC_PREFIXES)}
+    res["build_time_candidates"] = sorted(set(res["env_vars"]["build_time"]) | public_env)
     manifests = " ".join(read(f).lower() for f in files if f.name in {*MANIFESTS, "schema.prisma", "drizzle.config.ts"})
     names = set(res["env_vars"]["in_code"]) | set(res["env_vars"]["example"])
     if stack.get("framework") == "laravel":  # decided by phpstack alone (config/database.php names every driver)

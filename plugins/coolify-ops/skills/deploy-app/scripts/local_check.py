@@ -27,6 +27,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from analyze import with_build_args  # noqa: E402
+
 
 def free_port() -> int:
     with socket.socket() as s:
@@ -36,16 +39,6 @@ def free_port() -> int:
 
 def run(*cmd: str, timeout: int | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
-
-
-def with_build_args(dockerfile: str, keys: list[str]) -> str:
-    """Add «ARG KEY» after every FROM line, as Coolify does for build-time variables."""
-    out = []
-    for line in dockerfile.splitlines():
-        out.append(line)
-        if re.match(r"\s*FROM\s", line, re.I):
-            out += [f"ARG {k}" for k in keys]
-    return "\n".join(out) + "\n"
 
 
 def body(url: str) -> str:

@@ -31,28 +31,6 @@ def make(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """Any real HTTP request from a test is a bug: fail at once instead of waiting for DNS or a timeout."""
-    def blocked(*_a, **_k):
-        raise AssertionError("tests must not touch the network: mock coolify.api / coolify._apps")
-    monkeypatch.setattr(coolify.urllib.request, "urlopen", blocked)
-
-
-@pytest.fixture
-def config(tmp_path, monkeypatch):
-    """Isolated configuration in a temporary folder."""
-    monkeypatch.setenv("COOLIFY_OPS_HOME", str(tmp_path))
-    monkeypatch.setattr(coolify, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(coolify, "CONFIG", tmp_path / "config.json")
-    monkeypatch.setattr(coolify, "REGISTRY", tmp_path / "apps.json")
-    monkeypatch.setattr(coolify, "TOKEN_FILE", tmp_path / "token")
-    coolify.write_json(coolify.CONFIG, {"url": "http://coolify.test:8000", "base_domain": "example.org",
-                                        "server_uuid": "srv", "github_app_uuid": "gh",
-                                        "reserved_subdomains": ["hooks"]})
-    return tmp_path
-
-
 # ------------------------------------------------------------------ coolify.py
 
 
@@ -236,7 +214,7 @@ def test_monorepo_blocks(tmp_path):
     make(tmp_path, {"nx.json": "{}", "package.json": json.dumps({"dependencies": {"@angular/core": "21"}})})
     r = analyze.analyze(tmp_path)
     assert not r["deployable"]
-    assert any("monorepo" in b for b in r["blockers"])
+    assert any("workspaces (nx.json)" in b for b in r["blockers"])
 
 
 def test_secrets_block_without_showing_values(tmp_path):
@@ -298,6 +276,18 @@ def test_render_detects_missing_values():
     assert prepare.render("FROM node:{{NODE_VERSION}}", {"NODE_VERSION": "22"}) == "FROM node:22"
     with pytest.raises(ValueError):
         prepare.render("EXPOSE {{PORT}}", {})
+
+
+def test_prepare_declares_arg_for_build_time_variables(tmp_path, monkeypatch):
+    make(tmp_path, {"package.json": json.dumps({"scripts": {"build": "vite build"}, "devDependencies": {"vite": "^6"}}),
+                    "package-lock.json": "{}", "index.html": "<div></div>",
+                    "src/main.js": "fetch(import.meta.env.VITE_API_URL)\n",
+                    ".env.example": "VITE_API_URL=http://localhost\n"})
+    analysis = analyze.analyze(tmp_path)
+    assert analysis["build_time_candidates"] == ["VITE_API_URL"]
+    monkeypatch.setattr(sys, "argv", ["prepare.py", str(tmp_path)])
+    prepare.main()
+    assert (tmp_path / "Dockerfile").read_text().count("ARG VITE_API_URL") == 2  # once per stage (build, nginx)
 
 
 def test_every_template_renders_with_default_values():
@@ -432,14 +422,6 @@ def test_decommission_removes_the_apps_local_secrets(config, monkeypatch):
 
 
 # ------------------------------------------------------------------ repo.py (local git only, no network)
-
-
-@pytest.fixture
-def git_identity(monkeypatch):
-    for var, value in {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.org",
-                       "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.org",
-                       "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}.items():
-        monkeypatch.setenv(var, value)
 
 
 def test_repo_init_commit_and_state_of_a_new_project(tmp_path, git_identity):

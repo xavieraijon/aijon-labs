@@ -61,6 +61,16 @@ All notable changes to the plugins of this marketplace. The format is based on
 - `auth.json` (Composer credentials) is reported as a sensitive file.
 - `deploy-app` has a mode for «my change does not show»: it checks whether the change was pushed and, when the
   last deployment failed, reads that deployment's log (a failed migration keeps the previous version running).
+- Repositories with several apps in subfolders (e.g. `backend/` + `frontend/`, no app at the root): the analysis of
+  the repository lists each app folder (`monorepo.apps`), and each one is deployed from its folder as its own
+  Coolify app (`base_directory`), with its own domain (`<repository>-<folder>`), in one Coolify project per
+  repository, redeployed only when its folder changes (watch paths). `analyze.py` on an app folder reports the
+  repository (`git.root`, `git.subdir`).
+- `create-app --watch-paths GLOB` (repeatable); `--base-dir`, `--dockerfile` and watch paths are checked against
+  Coolify's own path rules before anything is created.
+- `decommission --with-project` keeps a project that other apps in `apps.json` still use (`project_kept`).
+- Workspaces (npm/yarn/pnpm, Turborepo, Nx, Lerna, Rush, uv), a root app plus several app folders, and
+  dependencies outside the app folder (`file:../`, `workspace:`, `-e ../`) are blocked with the change to make.
 
 #### Changed
 - `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
@@ -75,11 +85,24 @@ All notable changes to the plugins of this marketplace. The format is based on
   `DATABASE_URL` is handled like any other variable and the summary says «external».
 - `local_check.py` exits with a non-zero code when the check fails, and reports a missing Dockerfile as JSON.
 - `repo.py init` also ignores the build output folder (`dist/`, `build/`…) when the image builds it, so a local
-  build (which may hold inlined build-time values) is not committed. Plain static sites are not affected.
+  build (which may hold inlined build-time values) is not committed. Plain static sites are not affected. In a
+  repository with several apps it ignores each app's build folder (`frontend/dist/`).
+- `repo.py commit` scans what the commit will include: with `--all`, the whole repository (even when run from an
+  app folder), and always anything already staged.
+- Compose files only block when more than one service builds from the project folder; services that only use an
+  image (a local database, Redis…) are ignored, and the folders other services build from count as app folders.
+- A folder inside a git repository is analysed with the repository's remote and branch (it used to have no git
+  information unless `.git` was in that very folder). A folder inside a repository at the home folder (dotfiles),
+  and an app folder whose name Coolify rejects as a base directory (e.g. with spaces), are blocked.
+- `coolify.py status` reports each app's `base_dir`.
 - Build folders of the new frameworks (`.output`, `.nuxt`, `.svelte-kit`, `.astro`, `.react-router`) are left out
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- Build-time variables (`VITE_*`, `NEXT_PUBLIC_*`, `NUXT_PUBLIC_*`, `REACT_APP_*`, SvelteKit's `$env/static`) never
+  reached a real deployment: Coolify drops a build argument the Dockerfile does not declare with `ARG`, and no
+  template declared one. `local_check.py` patched it in only for the local check, so every real build silently
+  built with `undefined`/empty values. `prepare.py` now declares `ARG` for every such variable.
 - Laravel projects with a `package.json` (nearly all) were treated as a Vite single-page app and got an nginx
   image that could not run them.
 - A compose file's `networks:` and `volumes:` keys were counted as services, so a project with one service and a
