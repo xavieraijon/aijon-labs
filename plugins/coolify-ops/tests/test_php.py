@@ -234,7 +234,7 @@ def test_commented_trust_proxies_is_ignored(tmp_path):
 
 
 def test_own_and_generated_trustedproxy_files(tmp_path):
-    own = stack(laravel(tmp_path / "a", **{"config/trustedproxy.php": "<?php return ['proxies' => '10.0.0.1'];"}))
+    own = stack(laravel(tmp_path / "a", **{"config/trustedproxy.php": "<?php return ['proxies' => '192.168.1.10'];"}))
     assert own["trust_proxies"] == "project"
     generated = (TEMPLATES / "laravel-trustedproxy.php.tmpl").read_text()
     assert stack(laravel(tmp_path / "b", **{"config/trustedproxy.php": generated}))["trust_proxies"] == "generated"
@@ -414,7 +414,7 @@ def test_reanalysis_after_prepare_keeps_the_generated_proxy_file(tmp_path, monke
 
 
 def test_project_proxy_file_is_not_overwritten(tmp_path, monkeypatch, capsys):
-    own = "<?php return ['proxies' => '10.0.0.1'];"
+    own = "<?php return ['proxies' => '192.168.1.10'];"
     out = run_prepare(laravel(tmp_path, **{"config/trustedproxy.php": own}), monkeypatch, capsys, "--overwrite")
     assert "config/trustedproxy.php" not in out["created"]
     assert (tmp_path / "config/trustedproxy.php").read_text() == own
