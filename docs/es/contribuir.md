@@ -2,13 +2,14 @@
 
 *[In English](../../CONTRIBUTING.md)*
 
-¡Gracias por el interés! Se agradecen issues y pull requests; los fallos encontrados en servidores reales son
-especialmente útiles, porque cada instalación de Coolify es un poco distinta.
+¡Gracias por el interés! Se agradecen issues y pull requests; los fallos encontrados en uso real son
+especialmente útiles, porque cada servidor y proyecto es un poco distinto.
 
 ## Antes de empezar
 
-- Para un fallo, abre un issue con la plantilla: versión de Coolify, sistema y arquitectura, la orden o petición,
-  y la salida JSON (**tapa IPs, dominios, tokens y uuids**).
+- Para un fallo, abre un issue con la plantilla: el plugin/skill, su versión y la de cualquier herramienta
+  relevante (p. ej. la de Coolify), sistema y arquitectura, la orden o petición, y la salida JSON (**tapa IPs,
+  dominios, tokens y uuids**).
 - Para una función nueva o un plugin nuevo, abre antes un issue para acordar el enfoque.
 - Los problemas de seguridad van por [SECURITY.md](../../SECURITY.md), no por issues públicos.
 

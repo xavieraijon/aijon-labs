@@ -2,13 +2,14 @@
 
 *[En castellano](docs/es/contribuir.md)*
 
-Thanks for your interest! Issues and pull requests are welcome — bug reports from real servers are especially
-useful, since every Coolify setup is a little different.
+Thanks for your interest! Issues and pull requests are welcome — bug reports from real use are especially
+useful, since every server and project is a little different.
 
 ## Before you start
 
-- For a bug, open an issue with the template: the Coolify version, your OS/architecture, the command or request,
-  and the JSON output (**redact IPs, domains, tokens and uuids**).
+- For a bug, open an issue with the template: the plugin/skill, its version and any relevant tool version (e.g.
+  Coolify's), your OS/architecture, the command or request, and the JSON output (**redact IPs, domains, tokens
+  and uuids**).
 - For a new feature or a new plugin, open an issue first so we can agree on the approach.
 - Security problems go through [SECURITY.md](SECURITY.md), not public issues.
 
