@@ -75,10 +75,12 @@ All notable changes to the plugins of this marketplace. The format is based on
 - PostgreSQL backups through Coolify (4.6.0 or later). `create-postgres` schedules a daily backup on the server
   keeping the last 7 (`--backup none` to skip). New commands: `backup-status`, `backup-schedule` (frequency, how
   many are kept, on/off; keeping fewer asks first), `backup-now`, `backup-restore` (asks first, backs up the
-  current data, then restores a server backup with Coolify's import), `backup-restore-status` and
+  current data, empties the `public` schema and restores a server backup with Coolify's import, so tables created since
+  the backup do not block it; if the import fails the previous data is put back; needs `ssh` and PostgreSQL 15+), `backup-restore-status` and
   `backup-download` (`pg_dump` over ssh to `~/.config/coolify-ops/backups/<app>/`, never into a git repository; a
   broken dump is never kept). Manual and safety backups are kept apart from the scheduled ones (last 5), so they
   never push out the backup being restored. Failure output shows only error lines, never row data.
+- `decommission --with-db` deletes the database's backups on the server first (Coolify would leave the files).
 - `deploy-app` offers to download a copy before decommissioning an app with a database, and mentions restoring a
   backup after a Django or Laravel rollback.
 
@@ -111,6 +113,8 @@ All notable changes to the plugins of this marketplace. The format is based on
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- `init` run again (e.g. to add `--ssh`) keeps the saved server and GitHub App instead of picking `localhost` and
+  the first app.
 - Build-time variables (`VITE_*`, `NEXT_PUBLIC_*`, `NUXT_PUBLIC_*`, `REACT_APP_*`, SvelteKit's `$env/static`) never
   reached a real deployment: Coolify drops a build argument the Dockerfile does not declare with `ARG`, and no
   template declared one. `local_check.py` patched it in only for the local check, so every real build silently

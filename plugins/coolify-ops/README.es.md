@@ -106,7 +106,8 @@ sola.
 - Una sola confirmación por despliegue; rollback, retirar, restaurar una copia de la base de datos, guardar menos
   copias y borrar variables preguntan siempre.
 - Las bases de datos PostgreSQL nuevas tienen copias diarias en el servidor (se guardan las 7 últimas; nunca
-  ilimitadas). Antes de restaurar se hace una copia de los datos actuales. Las copias descargadas nunca van a un
+  ilimitadas). Antes de restaurar se hace una copia de los datos actuales (salvo que la base de datos esté vacía), que vuelve a
+  ponerse si la restauración falla (necesita `ssh` en la configuración). Las copias descargadas nunca van a un
   repositorio git.
 - Bases de datos siempre privadas; nunca abre puertos ni usa subdominios reservados o en uso.
 - Busca secretos en los ficheros que se subirían y para si encuentra alguno.

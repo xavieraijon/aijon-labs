@@ -31,10 +31,10 @@ is required by `GET /applications/{uuid}/logs` (`routes/api.php`); the scripts n
 | `backup-status` | `GET /databases/{uuid}/backups` (configurations with their `executions`: `uuid`, `filename`, `size`, `status`, `created_at`, `local_storage_deleted`) |
 | `backup-schedule` | no skill-made scheduled configuration → `POST /databases/{uuid}/backups` `{frequency, enabled: true, save_s3: false, database_backup_retention_amount_locally, timeout: 3601}` (refused, naming them, while the database has configurations made in Coolify; `--backup <uuid>` changes one of those instead); else `PATCH /databases/{uuid}/backups/{backup}` with only the changed fields (`frequency` is optional on update). A lower `--keep` that would delete backups answers `needs_confirmation` until `--confirmed` |
 | `backup-now` | manual configuration missing → `POST …/backups` `{frequency: "0 0 1 1 *", enabled: false, save_s3: false, backup_now: true, database_backup_retention_amount_locally: 5, timeout: 3599}`; else `PATCH …/backups/{backup}` `{backup_now: true}`; then `GET …/backups/{backup}/executions` every 5 s until a new execution is `success` or `failed` |
-| `backup-restore` | `backup-now` (safety backup, always: there is no option to skip it; `--backup-timeout`, default 900 s), the chosen execution read again, `POST /databases/{uuid}/imports` `{source: "server", path: <execution filename>, replace_existing: true}` (→ `id`), `GET /databases/{uuid}/imports/{id}` until `finished`, `error`, `killed`, `cancelled` or `closed` (`--timeout`, default 1800 s) |
+| `backup-restore` | checks first (ssh configured, a successful execution of this database ≤ 10 GiB whose file is `pg-dump-<this database>-…`, PostgreSQL ≥ 15 read over ssh); then, unless the database holds no tables, views or sequences: `backup-now` (safety backup, never skipped; `--backup-timeout`, default 900 s) and a `pg_dump` copy inside the database container; the chosen execution read again; over ssh, `public` emptied in one transaction (`lock_timeout` 30 s); `POST /databases/{uuid}/imports` `{source: "server", path: <execution filename>, replace_existing: true}` (→ `id`), `GET /databases/{uuid}/imports/{id}` until `finished`, `error`, `killed`, `cancelled` or `closed` (`--timeout`, default 1800 s). Import refused or failed → `public` emptied again and the in-container copy restored with `pg_restore` over ssh (`recovered`); import still running at the timeout, or contact lost while polling → nothing recovered, `import_id` |
 | `backup-restore-status` | `GET /databases/{uuid}/imports/{id}` (the id must be a number) |
 | `backup-download` | no API: over ssh, `docker exec <db uuid> pg_dump --format=custom` with the container's own `POSTGRES_USER`/`POSTGRES_DB` |
-| `decommission` | `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, `GET` until 404, server watched over ssh until the cleanup job is done, then `DELETE /projects/{uuid}` — skipped (`project_kept`) while another app in `apps.json` uses the same project |
+| `decommission` | with `--with-db`, first `DELETE /databases/{uuid}/backups/{backup}` for every backup configuration (Coolify deletes their files; needs `delete`; one failing stops everything else; a 404 on the list, Coolify before 4.6, means none), then `DELETE /applications/{uuid}`, `DELETE /databases/{uuid}`, `GET` until 404, server watched over ssh until the cleanup job is done, then `DELETE /projects/{uuid}` — skipped (`project_kept`) while another app in `apps.json` uses the same project |
 
 Notes:
 - A database's internal URL is `postgres://user:password@<database-uuid>:5432/<db>`: the host is the uuid and only
@@ -59,4 +59,8 @@ Notes:
   for `COPY … PROGRAM` and psql shell commands, then runs `pg_restore --exit-on-error --single-transaction
   --no-owner --no-acl --clean --if-exists`. `--clean` drops only objects that are in the dump: tables created after
   the backup stay, and a later table with a foreign key to a restored one makes the whole restore fail (nothing
-  changes). Imports need `write` and `deploy`.
+  changes). Imports need `write` and `deploy`. That is why `backup-restore` empties `public` first (a «clean
+  restore»): the `public` schema ends exactly as in the backup (objects in other schemas are kept unless they depend
+  on `public`).
+- Deleting a database keeps its backup files on the server (verified on v4.7.3); `DELETE …/backups/{backup}`
+  deletes the files of every execution and the empty folder (v4.6.0 and v4.7.3).

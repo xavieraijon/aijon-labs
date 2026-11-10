@@ -209,7 +209,7 @@ I reach the server over ssh as user@server, reserve the subdomain hooks, and new
 ```
 This runs `coolify.py init`, which checks the token, discovers your server and GitHub App and saves
 `~/.config/coolify-ops/config.json` (outside any repository). The ssh access is optional but lets the plugin
-check the server's health and clean up thoroughly when you delete an app.
+check the server's health, clean up thoroughly when you delete an app, and restore or download database backups.
 
 Then try the example app that ships with this repository. Coolify deploys from a GitHub repository, so copy it into
 its own folder first (the plugin will create a private repo for it and give you the push command):
@@ -229,7 +229,7 @@ longer need it: `/coolify-ops:deploy-app decommission hello-fastapi`.
   ideally to S3-compatible storage outside the server.
 - **Your apps' databases**: the PostgreSQL databases `deploy-app` creates get a daily backup on the server (the
   last 7 are kept). Ask Claude «do I have backups of hello-fastapi?», «back it up now», «restore yesterday's data»
-  (it always asks first and backs up the current data before restoring) or «download a copy» (to
+  (it always asks first, backs up the current data before restoring and puts it back if the restore fails; restoring needs the ssh access of step 9) or «download a copy» (to
   `~/.config/coolify-ops/backups/`). These backups live on the same server: for a copy that survives losing the
   server, download one now and then, or add an S3 destination in the database's *Backups* tab in Coolify.
 - **Updates:** `unattended-upgrades` covers security patches; run `sudo apt upgrade` now and then. Coolify

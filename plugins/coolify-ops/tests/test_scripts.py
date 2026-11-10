@@ -143,6 +143,7 @@ def test_decommission_waits_before_deleting_the_project(config, monkeypatch):
         return {}
 
     monkeypatch.setattr(coolify, "api", fake_api)
+    monkeypatch.setattr(coolify, "_configs", lambda db: [])
     monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
     r = coolify.cmd_decommission(argparse.Namespace(app="x", confirmed=True, with_db=True, with_project=True))
     assert r["deleted"]["project"] == "p1"
@@ -329,6 +330,7 @@ def test_decommission_waits_for_server_cleanup_not_for_404(config, monkeypatch):
     events = []
     monkeypatch.setattr(coolify, "api", _fake_delete_api(calls))
     monkeypatch.setattr(coolify, "_remote_leftovers", lambda target, uuids: events.append("check") or next(checks))
+    monkeypatch.setattr(coolify, "_configs", lambda db: [])
     monkeypatch.setattr(coolify, "_remove_app_images", lambda target, uuid: events.append(("images", uuid)) or 1)
     monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
     real_api = coolify.api

@@ -104,7 +104,7 @@ automatically.
 - One confirmation per deployment; rollback, decommission, restoring a database backup, keeping fewer backups and
   deleting variables always ask.
 - New PostgreSQL databases get daily backups on the server (last 7 kept; never unlimited). A restore first takes
-  a backup of the current data. Downloaded copies never go into a git repository.
+  a backup of the current data (unless the database is empty) and puts it back if the restore fails (it needs `ssh` in the configuration). Downloaded copies never go into a git repository.
 - Databases always private; never opens ports or uses reserved or taken subdomains.
 - Scans the files that would be pushed for secrets and stops if it finds any.
 - Passwords and tokens are masked in all output; variable values are never shown.

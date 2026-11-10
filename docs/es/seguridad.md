@@ -29,7 +29,10 @@ un problema de seguridad y merece un aviso:
   que crea la skill) se puede restaurar, con su propia pregunta.
 - **Publicar código lo hace el usuario.** Las skills nunca ejecutan `git push` ni crean repositorios con push.
 - **Sin `sudo` ni contraseñas en los servidores.** `provision-server` solo ejecuta órdenes de lectura por ssh con
-  clave y nunca acepta una clave de host desconocida en tu nombre.
+  clave y nunca acepta una clave de host desconocida en tu nombre. `deploy-app` usa el mismo acceso ssh para
+  vigilar el servidor y, solo durante un decommission o una restauración de copia confirmados, para borrar las
+  imágenes de la app o para vaciar y restaurar su base de datos dentro del contenedor de la base de datos (como el
+  usuario de la base de datos, sin sudo).
 - **Mínimo privilegio.** Tokens de la API con los permisos justos; `allowed-tools` limitado a los scripts de cada
   skill y a unas pocas órdenes de `gh` que solo leen de GitHub (git solo se usa a través de un script que no tiene push);
   los scripts se ejecutan con `python3 -I` y solo usan la biblioteca estándar de Python.

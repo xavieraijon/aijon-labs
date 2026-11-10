@@ -235,12 +235,13 @@ def cmd_init(a):
     servers = api("GET", "/servers")
     if not servers:
         raise Error("Coolify returned no servers.")
-    server = next((s for s in servers if s.get("name") == (a.server or "localhost")), servers[0])
+    server = next((s for s in servers if s.get("name") == (a.server or prev.get("server_name") or "localhost")),
+                  servers[0])
     gh_apps = api("GET", "/github-apps")
     private = [g for g in gh_apps if not g.get("is_public")] if isinstance(gh_apps, list) else []
     if not private:
         raise Error("No private GitHub App is connected in Coolify (Sources).")
-    gh = next((g for g in private if g.get("name") == a.github_app), private[0])
+    gh = next((g for g in private if g.get("name") == (a.github_app or prev.get("github_app_name"))), private[0])
     cfg.update({
         "server_uuid": server["uuid"], "server_name": server.get("name"),
         "github_app_uuid": gh["uuid"], "github_app_id": gh.get("id"), "github_app_name": gh.get("name"),
@@ -770,9 +771,25 @@ def cmd_decommission(a):
     if unknown:  # refuse before deleting anything, so nothing is left half done
         raise Error(f"The {' and '.join(unknown)} of this app are not in the local registry (apps.json): nothing was "
                     "deleted. Run without --with-db/--with-project and delete them in Coolify, or by their own uuid")
+    backups = []
+    if a.with_db:  # Coolify keeps the backup files of a deleted database: delete them first, through the API
+        dbu = reg[name]["db_uuid"]
+        try:
+            configs = _configs(dbu)
+        except Error as e:
+            if "404" not in str(e):  # no backup API (Coolify before 4.6): nothing to delete
+                raise
+            configs = []
+        for cfg in configs:
+            try:
+                api("DELETE", f"/databases/{dbu}/backups/{cfg['uuid']}")
+                backups.append(cfg["uuid"])
+            except Error as e:
+                raise Error(f"Could not delete the backups {cfg['uuid']} of the database ({e}); deleted so far: "
+                            f"{', '.join(backups) or 'none'}. Nothing else was deleted: run decommission again") from None
     api("DELETE", f"/applications/{app}", query={"delete_configurations": "true", "delete_volumes": "true",
                                                    "docker_cleanup": "true", "delete_connected_networks": "true"})
-    deleted = {"app": app}
+    deleted = {"app": app, **({"backups": backups} if a.with_db else {})}
     pending = [f"/applications/{app}"]
     if a.with_db:
         api("DELETE", f"/databases/{reg[name]['db_uuid']}", query={"delete_volumes": "true"})
@@ -1042,27 +1059,139 @@ def _import_result(db: str, imp, timeout: int) -> dict:
                      f"check it with backup-restore-status <app> {imp}"}
 
 
+MAX_IMPORT_BYTES = 10 * 1024 ** 3  # Coolify refuses larger imports (StartDatabaseImport::MAX_BYTES)
+MIN_CLEAN_RESTORE_PG = 150000  # CREATE SCHEMA … AUTHORIZATION pg_database_owner, as PostgreSQL 15+ creates «public»
+CONTAINER_COPY = "/tmp/coolify-ops-before-restore.dump"
+DUMP_NAME = re.compile(r"/pg-dump-(?P<db>.+)-\d+-[A-Za-z0-9]+\.dmp")
+# Third field: tables, views, sequences… in every schema of the user (not only «public»): 0 = nothing to protect.
+STATE_SQL = ("SELECT current_setting('server_version_num'), current_database(), "
+             "(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+             "WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') AND n.nspname <> 'information_schema' "
+             "AND n.nspname NOT LIKE 'pg\\_%');")
+# Empties «public» as PostgreSQL 15+ creates it. One transaction: a lock held by the app for 30 s cancels all of it.
+RESET_SQL = ("SET lock_timeout = '30s';\nDROP SCHEMA public CASCADE;\n"
+             "CREATE SCHEMA public AUTHORIZATION pg_database_owner;\nGRANT USAGE ON SCHEMA public TO PUBLIC;\n")
+PSQL = 'psql -X -q -At -1 -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
+
+
+def _ssh_db(target: str, db: str, command: str, stdin: str = "", timeout: int = 600):
+    """Run a shell command inside the database container over ssh; stdin (e.g. SQL) goes to it as a quoted
+    heredoc, never inside a shell string. db is validated by the caller. Returns (exit code, stdout, stderr)."""
+    script = f"docker exec -i {db} sh -c '{command}'"
+    if stdin and not stdin.endswith("\n"):  # the heredoc end marker must be on a line of its own
+        stdin += "\n"
+    script += f" <<'COOLIFY_OPS_EOF'\n{stdin}COOLIFY_OPS_EOF\n" if stdin else " </dev/null\n"
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "sh -s"],
+                           input=script, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return 255, "", f"ssh failed: {type(e).__name__}"
+    return r.returncode, r.stdout, r.stderr
+
+
+def _reset(target: str, db: str) -> tuple[bool, str]:
+    code, _out, err = _ssh_db(target, db, PSQL, RESET_SQL)
+    if code == 0:
+        return True, ""
+    if "lock timeout" in err:
+        return False, "the database is busy (a lock held for more than 30 s): nothing changed, try again"
+    return False, "could not empty the database: " + (" | ".join(error_lines(err)) or f"exit {code}")
+
+
+def _recover(target: str, db: str) -> bool:
+    """Put back the copy taken inside the container before the reset; keep the file if it fails."""
+    ok, _msg = _reset(target, db)
+    if ok:
+        code, _o, _e = _ssh_db(target, db, 'pg_restore --exit-on-error --single-transaction --no-owner --no-acl '
+                               f'-U "$POSTGRES_USER" -d "$POSTGRES_DB" {CONTAINER_COPY}', timeout=1800)
+        ok = code == 0
+    if ok:
+        _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
+    return ok
+
+
 def cmd_backup_restore(a):
+    """Clean restore: safety backup, a copy inside the container, empty «public», Coolify's import; if the import
+    fails, the copy is put back by the script itself. Every check runs before anything changes."""
     if not a.confirmed:
         raise Error("Restore requires --confirmed (the user must approve it first).")
+    target = (read_json(CONFIG, {}) or {}).get("ssh")
+    if not target:
+        raise Error("backup-restore needs «ssh» in the configuration (coolify.py init --ssh user@server): the "
+                    "database is emptied and, if the import fails, put back over ssh. Nothing was changed")
     db, info = _backup_target(a)
     chosen = _find_execution(db, a.execution)
     if not chosen or chosen.get("status") != "success" or chosen.get("local_storage_deleted"):
         raise Error(f"{a.execution!r} is not a successful backup of this database still on the server "
                     "(see backup-status)")
-    s = _backup_now(db, info, a.backup_timeout)  # always: never replace data without a copy of it
-    if s.get("status") != "success":
-        return {**_execution_result(s), "error": "the safety backup failed: nothing was restored"}
-    safety = s.get("uuid")
+    if _size(chosen) > MAX_IMPORT_BYTES:
+        raise Error("This backup is larger than 10 GiB, the most Coolify imports: nothing was changed")
+    code, out, err = _ssh_db(target, db, PSQL, STATE_SQL)
+    if code != 0:
+        raise Error("Cannot read the database over ssh: " + (" | ".join(error_lines(err)) or mask(err.strip()[-200:])))
+    try:
+        version, current_db, objects = (out.strip().splitlines() or [""])[-1].split("|")
+        version, objects = int(version), int(objects)
+    except ValueError:
+        raise Error("Unexpected answer from the database over ssh: nothing was changed") from None
+    m = DUMP_NAME.search(str(chosen.get("filename") or ""))
+    if not m or m.group("db") != re.sub(r"[^A-Za-z0-9_.-]", "-", current_db):
+        raise Error("This backup is not a dump of this app's database (another database, or all of them): "
+                    "nothing was changed")
+    if version < MIN_CLEAN_RESTORE_PG:
+        raise Error(f"A clean restore needs PostgreSQL 15 or later (this one is {version}): nothing was changed")
+    has_data = objects > 0
+    safety = None
+    if has_data:  # a database with nothing in it needs no copies (and retries must not rotate the real ones out)
+        s = _backup_now(db, info, a.backup_timeout)
+        if s.get("status") != "success":
+            return {**_execution_result(s), "error": "the safety backup failed: nothing was restored"}
+        safety = s.get("uuid")
     again = _find_execution(db, a.execution)  # retention runs after every backup: is the chosen file still there?
     if not again or again.get("local_storage_deleted"):
         return {"ok": False, "safety_backup": safety, "error": "the chosen backup no longer exists on the server "
                 "(removed by retention): nothing was restored"}
-    r = api("POST", f"/databases/{db}/imports",
-            {"source": "server", "path": again.get("filename"), "replace_existing": True}) or {}
-    result = _import_result(db, r.get("id"), a.timeout)
-    return {**result, "restored_from": {"uuid": again.get("uuid"), "created_at": again.get("created_at")},
+    base = {"restored_from": {"uuid": again.get("uuid"), "created_at": again.get("created_at")},
             "safety_backup": safety}
+    if has_data:
+        code, _o, err = _ssh_db(target, db, 'pg_dump --format=custom -U "$POSTGRES_USER" -d "$POSTGRES_DB" '
+                                f'-f {CONTAINER_COPY}', timeout=1800)
+        if code != 0:
+            return {**base, "ok": False, "error": "could not copy the current data inside the container: nothing "
+                    "was changed. " + " | ".join(error_lines(err))}
+    ok, msg = _reset(target, db)
+    if not ok:
+        if has_data:
+            _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
+        return {**base, "ok": False, "error": msg}
+    try:
+        r = api("POST", f"/databases/{db}/imports",
+                {"source": "server", "path": again.get("filename"), "replace_existing": True}) or {}
+    except Error as e:  # refused at the POST (size, validation…): nothing is running, the database is empty now
+        r = None
+        result = {"ok": False, "finished": True, "error": f"Coolify refused the import: {e}"}
+    if r is not None:
+        try:
+            result = _import_result(db, r.get("id"), a.timeout)
+        except Error as e:  # lost contact while polling: the import may still be running, never race it
+            result = {"ok": False, "finished": False, "import_id": r.get("id"),
+                      "error": f"Lost contact with Coolify while the restore runs on the server ({e}): check it "
+                               f"with backup-restore-status <app> {r.get('id')}"}
+    if result.get("ok"):
+        if has_data:
+            _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
+        return {**result, **base}
+    if not result.get("finished"):  # still running on the server: recovering now would race it
+        return {**result, **base, "copy_in_container": CONTAINER_COPY if has_data else None}
+    recovered = _recover(target, db) if has_data else True
+    out = {**result, **base, "ok": False, "recovered": recovered}
+    if has_data and recovered:
+        out["error"] = f"{result.get('error', 'the restore failed')}; the data from before the restore was put back"
+    elif has_data:
+        out["error"] = (f"{result.get('error', 'the restore failed')} and putting the previous data back failed too: "
+                        f"the database may be empty. Copies: {CONTAINER_COPY} inside the database container, and "
+                        f"the safety backup {safety} (backup-restore --execution {safety})")
+    return out
 
 
 def cmd_backup_restore_status(a):
@@ -1137,8 +1266,9 @@ def parser() -> argparse.ArgumentParser:
 
     c = s.add_parser("init", help="create/update the configuration (discovers server and GitHub App)")
     c.add_argument("--url"); c.add_argument("--domain", help="base domain, e.g. example.org")
-    c.add_argument("--ssh", help="user@host of the Coolify server (optional, for health checks)")
-    c.add_argument("--server", help="Coolify server name (default: localhost)")
+    c.add_argument("--ssh", help="user@host of the Coolify server (optional: server checks, thorough decommission, backup restore and "
+                   "download); re-running init keeps the saved server and GitHub App")
+    c.add_argument("--server", help="Coolify server name (default: the saved one, else localhost)")
     c.add_argument("--github-app", dest="github_app")
     c.add_argument("--reserved", action="append", help="subdomain that must not be used (repeatable)")
     c.add_argument("--projects-dir", dest="projects_dir", help="folder where projects are cloned (default ~/Projects)")

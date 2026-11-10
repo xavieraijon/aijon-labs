@@ -29,7 +29,9 @@ issue worth reporting:
   backup (on by default for the PostgreSQL databases the skill creates) can be restored, after its own question.
 - **Publishing code is done by the user.** The skills never run `git push` or create repositories with a push.
 - **No sudo, no passwords on servers.** `provision-server` only runs read-only commands over ssh with key
-  authentication and never accepts an unknown host key on your behalf.
+  authentication and never accepts an unknown host key on your behalf. `deploy-app` uses the same ssh access to
+  watch the server and, only during a confirmed decommission or backup restore, to remove the app's images or to
+  empty and restore its database inside the database container (as the database user, without sudo).
 - **Least privilege.** API tokens with only the permissions needed; `allowed-tools` limited to each skill's own
   scripts plus a few `gh` commands that only read from GitHub (git runs only through a script that has no push); scripts run with
   `python3 -I` and use only the Python standard library.
