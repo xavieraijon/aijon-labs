@@ -9,7 +9,7 @@ push. Everything goes through the Coolify API: no browser automation.
 
 | Skill | Invoke | What it does |
 |---|---|---|
-| `deploy-app` | `/coolify-ops:deploy-app` | Deploy and manage apps (status, logs, update, env vars, rollback, decommission) |
+| `deploy-app` | `/coolify-ops:deploy-app` | Deploy and manage apps (status, logs, update, env vars, rollback, PostgreSQL backups and restore, decommission) |
 | `provision-server` | `/coolify-ops:provision-server` | Set up Coolify on a VPS or home server step by step, checking each step (never handles passwords or `sudo`) |
 
 ```
@@ -19,6 +19,7 @@ push. Everything goes through the Coolify API: no browser automation.
 > deploy ~/Projects/my-shop
 > /coolify-ops:deploy-app status
 > /coolify-ops:deploy-app logs my-shop
+> /coolify-ops:deploy-app backups my-shop
 > /coolify-ops:deploy-app decommission test-app
 ```
 
@@ -93,13 +94,17 @@ gives you the command to run yourself (`! git push`).
 | `~/.config/coolify-ops/config.json` | Coolify URL, base domain, server and GitHub App uuids, ssh, projects folder, default limits |
 | `~/.config/coolify-ops/apps.json` | Registry of deployed apps (name → uuids, domain) |
 | `~/.config/coolify-ops/secrets/<app>.env` | Variable values for each app (`chmod 600`; `coolify.py env-template` creates it with empty keys, and empty values are never uploaded) |
+| `~/.config/coolify-ops/backups/<app>/` | Database copies downloaded with `coolify.py backup-download` (folder 700, files 600); they hold all the app's data |
 
 Override the folder with `COOLIFY_OPS_HOME`. A v0.1 configuration in `~/.config/coolify-deploy/` is migrated
 automatically.
 
 ## Safety
 
-- One confirmation per deployment; rollback, decommission and deleting variables always ask.
+- One confirmation per deployment; rollback, decommission, restoring a database backup, keeping fewer backups and
+  deleting variables always ask.
+- New PostgreSQL databases get daily backups on the server (last 7 kept; never unlimited). A restore first takes
+  a backup of the current data. Downloaded copies never go into a git repository.
 - Databases always private; never opens ports or uses reserved or taken subdomains.
 - Scans the files that would be pushed for secrets and stops if it finds any.
 - Passwords and tokens are masked in all output; variable values are never shown.

@@ -72,6 +72,16 @@ All notable changes to the plugins of this marketplace. The format is based on
 - Workspaces (npm/yarn/pnpm, Turborepo, Nx, Lerna, Rush, uv), a root app plus several app folders, and
   dependencies outside the app folder (`file:../`, `workspace:`, `-e ../`) are blocked with the change to make.
 
+- PostgreSQL backups through Coolify (4.6.0 or later). `create-postgres` schedules a daily backup on the server
+  keeping the last 7 (`--backup none` to skip). New commands: `backup-status`, `backup-schedule` (frequency, how
+  many are kept, on/off; keeping fewer asks first), `backup-now`, `backup-restore` (asks first, backs up the
+  current data, then restores a server backup with Coolify's import), `backup-restore-status` and
+  `backup-download` (`pg_dump` over ssh to `~/.config/coolify-ops/backups/<app>/`, never into a git repository; a
+  broken dump is never kept). Manual and safety backups are kept apart from the scheduled ones (last 5), so they
+  never push out the backup being restored. Failure output shows only error lines, never row data.
+- `deploy-app` offers to download a copy before decommissioning an app with a database, and mentions restoring a
+  backup after a Django or Laravel rollback.
+
 #### Changed
 - `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
   `index.csr.html`, `__spa-fallback.html`) and no HTML page is cached. Static sites that are not single-page apps
@@ -94,7 +104,9 @@ All notable changes to the plugins of this marketplace. The format is based on
 - A folder inside a git repository is analysed with the repository's remote and branch (it used to have no git
   information unless `.git` was in that very folder). A folder inside a repository at the home folder (dotfiles),
   and an app folder whose name Coolify rejects as a base directory (e.g. with spaces), are blocked.
-- `coolify.py status` reports each app's `base_dir`.
+- `coolify.py status` reports each app's `base_dir`, and each PostgreSQL database's `backups` (on/off,
+  frequency, last successful backup).
+- `coolify.py` exits with code 1 whenever its answer has `ok: false` (e.g. a failed `wait`), not only on errors.
 - Build folders of the new frameworks (`.output`, `.nuxt`, `.svelte-kit`, `.astro`, `.react-router`) are left out
   of the image, the analysis and the `.gitignore` written for new repositories.
 

@@ -21,11 +21,12 @@ un problema de seguridad y merece un aviso:
   de las variables nunca se muestran.
 - **Nada personal en el repositorio.** Las IPs, dominios, uuids y secretos de cada usuario viven en
   `~/.config/<plugin>/`, nunca en el repo.
-- **Las acciones irreversibles preguntan siempre** (borrar, rollback, force push), aunque el resto del flujo sea
-  automático. Una excepción declarada: una app Django o Laravel desplegada con `deploy-app` aplica sus
+- **Las acciones irreversibles preguntan siempre** (borrar, rollback, restaurar una copia de la base de datos,
+  guardar menos copias, force push), aunque el resto del flujo sea automático. Una excepción declarada: una app Django o Laravel desplegada con `deploy-app` aplica sus
   migraciones de base de datos en cada arranque, así que con auto-deploy cada push ejecuta las migraciones nuevas sin preguntar (el
   resumen del despliegue lo dice antes de la única confirmación). Una migración que borra una columna pierde esos
-  datos, un rollback no la deshace y la skill todavía no hace copias de seguridad de la base de datos.
+  datos y un rollback no la deshace; la copia diaria de la base de datos (activada por defecto en las PostgreSQL
+  que crea la skill) se puede restaurar, con su propia pregunta.
 - **Publicar código lo hace el usuario.** Las skills nunca ejecutan `git push` ni crean repositorios con push.
 - **Sin `sudo` ni contraseñas en los servidores.** `provision-server` solo ejecuta órdenes de lectura por ssh con
   clave y nunca acepta una clave de host desconocida en tu nombre.
@@ -33,7 +34,9 @@ un problema de seguridad y merece un aviso:
   skill y a unas pocas órdenes de `gh` que solo leen de GitHub (git solo se usa a través de un script que no tiene push);
   los scripts se ejecutan con `python3 -I` y solo usan la biblioteca estándar de Python.
 - **Privado por defecto.** Las bases de datos nunca se hacen públicas y nunca se abren puertos del router ni del
-  cortafuegos.
+  cortafuegos. Las copias de la base de datos que descarga `deploy-app` van por defecto a
+  `~/.config/coolify-ops/backups/` (carpeta 700); los ficheros siempre tienen modo 600 y nunca se escriben dentro de
+  un repositorio git.
 
 ## Versiones con soporte
 

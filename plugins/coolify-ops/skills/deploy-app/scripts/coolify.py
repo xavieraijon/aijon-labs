@@ -272,7 +272,22 @@ def cmd_status(_a):
              "base_dir": ap.get("base_directory") or "/", "autodeploy": _autodeploy(ap)} for ap in _apps()]
     dbs = [{"name": d.get("name"), "uuid": d.get("uuid"), "type": d.get("database_type"), "status": d.get("status"),
             "public": d.get("is_public")} for d in (api("GET", "/databases") or [])]
+    for d in dbs:
+        if d["type"] == "standalone-postgresql" and d["uuid"]:
+            d["backups"] = _backup_summary(d["uuid"])
     return {"ok": True, "apps": apps, "databases": dbs, "local_registry": sorted(registry())}
+
+
+def _backup_summary(db: str) -> dict:
+    """Short backup state for «status»; an error on one database does not stop the listing."""
+    try:
+        cfgs = _configs(db)
+    except Error as e:
+        return {"error": str(e)}
+    sched = next((c for c in cfgs if c.get("enabled")), None)
+    kept = sorted((str(e.get("created_at") or "") for c in cfgs for e in _kept(c)), reverse=True)
+    return {"enabled": bool(sched), "frequency": sched.get("frequency") if sched else None,
+            "last_success_at": kept[0] if kept else None}
 
 
 def domains_in_use() -> set[str]:
@@ -327,8 +342,15 @@ def cmd_create_postgres(a):
     save_to_registry(a.app or a.name, {"db_uuid": uuid, "project_uuid": a.project})
     if a.app_uuid:  # connect it to the app as DATABASE_URL or --env-key (secret; build time only if the build inlines it)
         _set_env(a.app_uuid, env_key, internal_url, secret=True, buildtime=getattr(a, "buildtime", False))
-    return {"ok": True, "db_uuid": uuid, "internal_host": uuid, "user": user, "env_key": env_key,
-            "database_url": mask(internal_url), "linked_to_app": bool(a.app_uuid)}
+    result = {"ok": True, "db_uuid": uuid, "internal_host": uuid, "user": user, "env_key": env_key,
+              "database_url": mask(internal_url), "linked_to_app": bool(a.app_uuid)}
+    if getattr(a, "backup", "daily") != "none":  # daily backups on the server, last DEFAULT_KEEP kept
+        try:
+            _check_backup_version()
+            result["backup"] = {"frequency": "daily", "keep": DEFAULT_KEEP, "backup_uuid": _create_schedule(uuid)}
+        except Error as e:  # the database exists and works: report, do not fail
+            result["backup_warning"] = f"no backup schedule was created: {e}"
+    return result
 
 
 def _path_errors(a) -> list[str]:
@@ -791,6 +813,319 @@ def cmd_decommission(a):
     return {"ok": True, "deleted": deleted}
 
 
+# ---------------------------------------------------------------- PostgreSQL backups
+# Coolify runs, rotates and records the backups (pg_dump --format=custom on the server). Retention is per backup
+# configuration and deletes the files beyond the limit, so the skill keeps two configurations per database:
+#   scheduled  enabled, the user's frequency, keep 7 by default
+#   manual     disabled (never runs on its own): backup-now and the safety backup before a restore, keep 5
+# They are told apart by a timeout value only the skill sets; configurations made in Coolify are never changed.
+
+MIN_BACKUP_VERSION = (4, 6, 0)  # the only version whose API this was checked against
+TIMEOUT_SCHEDULED = 3601
+TIMEOUT_MANUAL = 3599
+DEFAULT_KEEP = 7
+MANUAL_KEEP = 5
+MANUAL_FREQUENCY = "0 0 1 1 *"  # required by the API; unused while the configuration is disabled
+FREQUENCY_KEYWORDS = {"hourly", "daily", "weekly", "monthly", "yearly"}
+CRON_FIELD = re.compile(r"[0-9*/,-]+")
+DB_UUID = re.compile(r"[a-z0-9]{10,40}")
+IMPORT_FINAL = {"finished", "error", "killed", "cancelled", "closed"}
+POLL_SECONDS = 5
+# Failure output may quote rows of the database (CONTEXT/DETAIL lines, «Command was»): keep only error lines
+ERROR_LINE = re.compile(r"^\s*(ERROR:|FATAL:|pg_restore: error:|pg_dump: error:|Blocked PostgreSQL restore|"
+                        r".*Nothing was changed)")
+
+
+def valid_frequency(value: str) -> bool:
+    if value in FREQUENCY_KEYWORDS:
+        return True
+    fields = value.split()
+    return len(fields) == 5 and all(CRON_FIELD.fullmatch(f) for f in fields)
+
+
+def error_lines(text, limit: int = 10) -> list[str]:
+    lines = [mask(line.strip())[:300] for line in str(text or "").splitlines() if ERROR_LINE.match(line)]
+    return lines[-limit:]
+
+
+def _check_backup_version() -> None:
+    v = api("GET", "/version")
+    text = v.get("text", "") if isinstance(v, dict) else v
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", str(text))
+    if not m or tuple(int(x) for x in m.groups()) < MIN_BACKUP_VERSION:
+        found = m.group(0) if m else "unknown"
+        raise Error(f"Database backups need Coolify {'.'.join(map(str, MIN_BACKUP_VERSION))} or later "
+                    f"(found {found}). Update Coolify first.")
+
+
+def _registry_db(app: str) -> str | None:
+    reg = registry()
+    entry = reg.get(app) or next((v for v in reg.values() if v.get("app_uuid") == app), {})
+    return entry.get("db_uuid")
+
+
+def _backup_target(a) -> tuple[str, dict]:
+    """(database uuid, database detail) for --db or the app's database in apps.json; PostgreSQL only."""
+    _check_backup_version()
+    db = getattr(a, "db", None) or _registry_db(a.app)
+    if not db:
+        raise Error(f"No database of {a.app!r} in the local registry (apps.json): pass --db <uuid> "
+                    "(see «status» for the uuids)")
+    if not DB_UUID.fullmatch(db):
+        raise Error(f"Invalid database uuid: {db!r}")
+    info = api("GET", f"/databases/{db}") or {}
+    if info.get("database_type") != "standalone-postgresql":
+        raise Error(f"Backups from the skill are only for PostgreSQL (this database is {info.get('database_type')})")
+    return db, info
+
+
+def _origin(cfg: dict) -> str:
+    return {TIMEOUT_SCHEDULED: "scheduled", TIMEOUT_MANUAL: "manual"}.get(cfg.get("timeout"), "other")
+
+
+def _configs(db: str) -> list[dict]:
+    r = api("GET", f"/databases/{db}/backups")
+    return r if isinstance(r, list) else []
+
+
+def _kept(cfg: dict) -> list[dict]:
+    """Successful executions whose file is still on the server, newest first."""
+    ex = [e for e in cfg.get("executions") or [] if e.get("status") == "success" and not e.get("local_storage_deleted")]
+    return sorted(ex, key=lambda e: str(e.get("created_at") or ""), reverse=True)
+
+
+def _size(e: dict) -> int:
+    try:
+        return int(float(e.get("size") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _create_schedule(db: str, frequency: str = "daily", keep: int = DEFAULT_KEEP) -> str:
+    body = {"frequency": frequency, "enabled": True, "save_s3": False,
+            "database_backup_retention_amount_locally": keep, "timeout": TIMEOUT_SCHEDULED}
+    return (api("POST", f"/databases/{db}/backups", body) or {}).get("uuid")
+
+
+def cmd_backup_status(a):
+    db, info = _backup_target(a)
+    cfgs = _configs(db)
+    schedules = [{"uuid": c.get("uuid"), "origin": _origin(c), "frequency": c.get("frequency"),
+                  "enabled": c.get("enabled"), "keep": c.get("database_backup_retention_amount_locally"),
+                  "keep_days": c.get("database_backup_retention_days_locally"), "save_s3": c.get("save_s3")}
+                 for c in cfgs]
+    kept = sorted(((e, _origin(c)) for c in cfgs for e in _kept(c)),
+                  key=lambda p: str(p[0].get("created_at") or ""), reverse=True)
+    backups = [{"uuid": e.get("uuid"), "created_at": e.get("created_at"), "size_bytes": _size(e), "origin": o}
+               for e, o in kept[:10]]
+    last_success = backups[0]["created_at"] if backups else None
+    failed = sorted((str(e.get("created_at") or "") for c in cfgs for e in c.get("executions") or []
+                     if e.get("status") == "failed"), reverse=True)
+    last_failed = failed[0] if failed and (not last_success or failed[0] > str(last_success)) else None
+    return {"ok": True, "db_uuid": db, "database_status": info.get("status"), "schedules": schedules,
+            "has_schedule": any(s["origin"] == "scheduled" for s in schedules),
+            "has_any_schedule": any(s["enabled"] for s in schedules), "backups": backups,
+            "last_success_at": last_success, "last_failed_at": last_failed}
+
+
+def cmd_backup_schedule(a):
+    if a.frequency and not valid_frequency(a.frequency):
+        raise Error(f"Invalid frequency {a.frequency!r}: use hourly, daily, weekly, monthly or a 5-field cron")
+    if a.keep is not None and a.keep < 1:
+        raise Error("--keep must be 1 or more (the skill never keeps every backup forever: the disk would fill up)")
+    db, _info = _backup_target(a)
+    cfgs = _configs(db)
+    if a.backup:
+        cfg = next((c for c in cfgs if c.get("uuid") == a.backup), None)
+        if not cfg:
+            raise Error(f"No backup configuration {a.backup!r} on this database")
+    else:
+        cfg = next((c for c in cfgs if _origin(c) == "scheduled"), None)
+        others = [c.get("uuid") for c in cfgs if _origin(c) == "other"]
+        if not cfg and others:
+            raise Error("This database has backup configurations made in Coolify: choose one with --backup "
+                        f"({', '.join(others)}) or change them in Coolify")
+    if not cfg:
+        if a.off:
+            return {"ok": True, "created": False, "enabled": False, "message": "no schedule to turn off"}
+        keep = a.keep or DEFAULT_KEEP
+        uuid = _create_schedule(db, a.frequency or "daily", keep)
+        return {"ok": True, "created": True, "backup_uuid": uuid, "frequency": a.frequency or "daily", "keep": keep}
+    changes = {}
+    if a.frequency and a.frequency != cfg.get("frequency"):
+        changes["frequency"] = a.frequency
+    if a.keep is not None and a.keep != cfg.get("database_backup_retention_amount_locally"):
+        would_delete = max(0, len(_kept(cfg)) - a.keep)
+        if would_delete and not a.confirmed:
+            return {"ok": False, "needs_confirmation": True, "would_delete": would_delete,
+                    "error": f"Keeping {a.keep} deletes the {would_delete} oldest backup(s) at the next run: "
+                             "ask the user, then repeat with --confirmed"}
+        changes["database_backup_retention_amount_locally"] = a.keep
+    if a.off and cfg.get("enabled"):
+        changes["enabled"] = False
+    elif not a.off and not cfg.get("enabled") and _origin(cfg) == "scheduled":
+        changes["enabled"] = True
+    if changes:
+        api("PATCH", f"/databases/{db}/backups/{cfg['uuid']}", changes)
+    merged = {**cfg, **changes}
+    return {"ok": True, "created": False, "backup_uuid": cfg.get("uuid"), "changed": sorted(changes),
+            "frequency": merged.get("frequency"), "keep": merged.get("database_backup_retention_amount_locally"),
+            "enabled": merged.get("enabled")}
+
+
+def _backup_now(db: str, info: dict, timeout: int) -> dict:
+    """Run a backup in the manual configuration and wait for its execution. Returns the execution."""
+    status = str(info.get("status") or "")
+    if not status.startswith("running"):
+        raise Error(f"The database is not running ({status or 'unknown'}): Coolify skips backups of stopped "
+                    "databases. Start it in Coolify first")
+    manual = next((c for c in _configs(db) if _origin(c) == "manual"), None)
+    if manual:
+        before = {e.get("uuid") for e in manual.get("executions") or []}
+        backup = manual["uuid"]
+        api("PATCH", f"/databases/{db}/backups/{backup}", {"backup_now": True})
+    else:
+        before = set()
+        body = {"frequency": MANUAL_FREQUENCY, "enabled": False, "save_s3": False, "backup_now": True,
+                "database_backup_retention_amount_locally": MANUAL_KEEP, "timeout": TIMEOUT_MANUAL}
+        backup = (api("POST", f"/databases/{db}/backups", body) or {}).get("uuid")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(POLL_SECONDS)
+        r = api("GET", f"/databases/{db}/backups/{backup}/executions") or {}
+        new = [e for e in r.get("executions") or [] if e.get("uuid") not in before]
+        if new and new[0].get("status") in ("success", "failed"):
+            return new[0]
+    raise Error(f"The backup did not finish in {timeout} s; it may still be running on the server: "
+                "check with backup-status")
+
+
+def _execution_result(e: dict) -> dict:
+    r = {"ok": e.get("status") == "success", "execution_uuid": e.get("uuid"), "status": e.get("status"),
+         "size_bytes": _size(e), "created_at": e.get("created_at")}
+    if not r["ok"]:
+        r["error"] = "the backup failed"
+        r["message"] = error_lines(e.get("message")) or ["no error line in the message (see the backup in Coolify)"]
+    return r
+
+
+def cmd_backup_now(a):
+    db, info = _backup_target(a)
+    return _execution_result(_backup_now(db, info, a.timeout))
+
+
+def _find_execution(db: str, uuid: str) -> dict | None:
+    return next((e for c in _configs(db) for e in c.get("executions") or [] if e.get("uuid") == uuid), None)
+
+
+def _import_summary(imp, r: dict) -> dict:
+    """Result of a restore from GET .../imports/{id}: running, finished (ok) or failed (error lines only)."""
+    status = r.get("status")
+    out = {"import_id": imp, "status": status, "exit_code": r.get("exit_code"), "finished": status in IMPORT_FINAL}
+    out["ok"] = status == "finished" and r.get("exit_code") in (0, None)
+    if out["finished"] and not out["ok"]:
+        out["error"] = "the restore failed"
+        out["output"] = error_lines(r.get("output")) or ["no error line in the output (see the database in Coolify)"]
+    return out
+
+
+def _import_result(db: str, imp, timeout: int) -> dict:
+    deadline = time.time() + timeout
+    r = {}
+    while time.time() < deadline:
+        time.sleep(POLL_SECONDS)
+        r = api("GET", f"/databases/{db}/imports/{imp}") or {}
+        if r.get("status") in IMPORT_FINAL:
+            return _import_summary(imp, r)
+    return {**_import_summary(imp, r), "ok": False,
+            "error": f"The restore did not finish in {timeout} s and is still running on the server: "
+                     f"check it with backup-restore-status <app> {imp}"}
+
+
+def cmd_backup_restore(a):
+    if not a.confirmed:
+        raise Error("Restore requires --confirmed (the user must approve it first).")
+    db, info = _backup_target(a)
+    chosen = _find_execution(db, a.execution)
+    if not chosen or chosen.get("status") != "success" or chosen.get("local_storage_deleted"):
+        raise Error(f"{a.execution!r} is not a successful backup of this database still on the server "
+                    "(see backup-status)")
+    s = _backup_now(db, info, a.backup_timeout)  # always: never replace data without a copy of it
+    if s.get("status") != "success":
+        return {**_execution_result(s), "error": "the safety backup failed: nothing was restored"}
+    safety = s.get("uuid")
+    again = _find_execution(db, a.execution)  # retention runs after every backup: is the chosen file still there?
+    if not again or again.get("local_storage_deleted"):
+        return {"ok": False, "safety_backup": safety, "error": "the chosen backup no longer exists on the server "
+                "(removed by retention): nothing was restored"}
+    r = api("POST", f"/databases/{db}/imports",
+            {"source": "server", "path": again.get("filename"), "replace_existing": True}) or {}
+    result = _import_result(db, r.get("id"), a.timeout)
+    return {**result, "restored_from": {"uuid": again.get("uuid"), "created_at": again.get("created_at")},
+            "safety_backup": safety}
+
+
+def cmd_backup_restore_status(a):
+    """Read-only. While the restore runs: ok true, «finished» false. Finished: ok tells whether it worked."""
+    if not re.fullmatch(r"\d{1,12}", str(a.import_id)):
+        raise Error(f"Invalid import id: {a.import_id!r} (a number, from backup-restore)")
+    db, _info = _backup_target(a)
+    out = _import_summary(a.import_id, api("GET", f"/databases/{db}/imports/{a.import_id}") or {})
+    return out if out["finished"] else {**out, "ok": True}
+
+
+def _inside_git(path: Path) -> bool:
+    p = path
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        r = subprocess.run(["git", "-C", str(p), "rev-parse", "--is-inside-work-tree"],
+                           capture_output=True, text=True, timeout=20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False  # no git: not a repository
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def cmd_backup_download(a):
+    db, _info = _backup_target(a)
+    target = (read_json(CONFIG, {}) or {}).get("ssh")
+    if not target:
+        raise Error("backup-download needs «ssh» in the configuration (coolify.py init --ssh user@server). "
+                    "Without it, download a backup from Coolify: the database → Backups → Download")
+    name = a.app if APP_NAME.fullmatch(a.app) else db
+    default = not a.out
+    out = (CONFIG_DIR / "backups" / name) if default else Path(a.out).expanduser()
+    if _inside_git(out):
+        raise Error(f"{out} is inside a git repository: a dump holds all the app's data and must never be "
+                    "committed. Choose --out outside any git repository")
+    out.mkdir(parents=True, exist_ok=True)
+    if default:
+        for d in (CONFIG_DIR, CONFIG_DIR / "backups", out):
+            d.chmod(0o700)
+    final = out / f"{name}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.dump"
+    part = final.with_name(final.name + ".part")
+    # db is validated above; the single quotes keep $POSTGRES_* for the container's shell (no password needed)
+    script = f"docker exec {db} sh -c 'pg_dump --format=custom -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"'\n"
+    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "sh -s"],
+                               input=script.encode(), stdout=f, stderr=subprocess.PIPE, timeout=a.timeout)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        part.unlink(missing_ok=True)
+        raise Error(f"The download did not finish ({type(e).__name__}): nothing was kept") from None
+    with open(part, "rb") as f:
+        magic = f.read(5)
+    if r.returncode != 0 or magic != b"PGDMP":
+        part.unlink(missing_ok=True)
+        detail = error_lines(r.stderr.decode(errors="replace"))
+        if not detail and r.returncode == 255:
+            detail = ["ssh failed (check «ssh <server>» works without a password)"]
+        raise Error(f"The dump failed (exit {r.returncode}): nothing was kept. " + " | ".join(detail))
+    part.replace(final)
+    return {"ok": True, "file": str(final), "size_bytes": final.stat().st_size}
+
+
 # ---------------------------------------------------------------- CLI
 
 
@@ -852,6 +1187,8 @@ def parser() -> argparse.ArgumentParser:
                    help="DATABASE_URL also at build time (when the build inlines it, e.g. SvelteKit $env/static/private)")
     c.add_argument("--env-key", dest="env_key", default="DATABASE_URL", metavar="KEY",
                    help="name of the app variable that receives the URL (Laravel: DB_URL)")
+    c.add_argument("--backup", choices=["daily", "none"], default="daily",
+                   help=f"daily backups on the server, last {DEFAULT_KEEP} kept (default) or none")
     c.set_defaults(f=cmd_create_postgres)
 
     c = s.add_parser("env-set", help="KEY=value (with --stdin the value is read from standard input)")
@@ -900,13 +1237,43 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--with-db", dest="with_db", action="store_true")
     c.add_argument("--with-project", dest="with_project", action="store_true")
     c.set_defaults(f=cmd_decommission)
+
+    def backup_parser(name, help_):
+        c = s.add_parser(name, help=help_)
+        c.add_argument("app", help="app name in apps.json or app uuid")
+        c.add_argument("--db", help="database uuid (when the app's database is not in apps.json)")
+        return c
+
+    backup_parser("backup-status", "PostgreSQL backups: schedules and the latest backups (read-only)"
+                  ).set_defaults(f=cmd_backup_status)
+    c = backup_parser("backup-schedule", "create or change the scheduled backups (lowering --keep needs --confirmed)")
+    c.add_argument("--frequency", help="hourly, daily, weekly, monthly or a 5-field cron (default daily)")
+    c.add_argument("--keep", type=int, help=f"backups kept on the server (default {DEFAULT_KEEP}, minimum 1)")
+    c.add_argument("--off", action="store_true", help="stop the scheduled backups (existing ones stay)")
+    c.add_argument("--backup", help="uuid of a backup configuration made in Coolify to change instead")
+    c.add_argument("--confirmed", action="store_true"); c.set_defaults(f=cmd_backup_schedule)
+    c = backup_parser("backup-now", f"take a backup now (kept apart from the scheduled ones, last {MANUAL_KEEP})")
+    c.add_argument("--timeout", type=int, default=900); c.set_defaults(f=cmd_backup_now)
+    c = backup_parser("backup-restore", "replace the database's data with a backup (needs --confirmed)")
+    c.add_argument("--execution", required=True, help="backup uuid from backup-status")
+    c.add_argument("--confirmed", action="store_true")
+    c.add_argument("--timeout", type=int, default=1800, help="seconds to wait for the restore")
+    c.add_argument("--backup-timeout", dest="backup_timeout", type=int, default=900,
+                   help="seconds to wait for the safety backup")
+    c.set_defaults(f=cmd_backup_restore)
+    c = backup_parser("backup-restore-status", "state of a restore that was still running (read-only)")
+    c.add_argument("import_id"); c.set_defaults(f=cmd_backup_restore_status)
+    c = backup_parser("backup-download", "copy the database to this computer (pg_dump over ssh; never into a git repo)")
+    c.add_argument("--out", help="folder (default ~/.config/coolify-ops/backups/<app>/)")
+    c.add_argument("--timeout", type=int, default=1800); c.set_defaults(f=cmd_backup_download)
     return p
 
 
 def main(argv=None) -> None:
     args = parser().parse_args(argv)
     try:
-        emit(args.f(args))
+        result = args.f(args)
+        emit(result, 0 if result.get("ok", True) else 1)
     except Error as e:
         emit({"ok": False, "error": str(e)}, 1)
 

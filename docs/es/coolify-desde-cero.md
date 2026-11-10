@@ -229,8 +229,12 @@ ya no la necesites: `/coolify-ops:deploy-app decommission hello-fastapi`.
 
 - **Los datos del propio Coolify** (ajustes, apps, secretos cifrados): *Settings → Backup* (`/settings/backup`);
   activa las copias programadas, a ser posible en un almacenamiento compatible con S3 fuera del servidor.
-- **Las bases de datos de tus apps** (p. ej. las de PostgreSQL que crea este plugin): cada base de datos tiene su
-  pestaña *Backups* con programación y destinos S3.
+- **Las bases de datos de tus apps**: las PostgreSQL que crea `deploy-app` tienen una copia diaria en el servidor
+  (se guardan las 7 últimas). Pídele a Claude «¿tengo copias de hello-fastapi?», «haz una copia ahora», «restaura
+  los datos de ayer» (siempre pregunta antes y hace una copia de los datos actuales antes de restaurar) o
+  «descarga una copia» (a `~/.config/coolify-ops/backups/`). Estas copias están en el mismo servidor: para tener
+  una que sobreviva a perderlo, descarga una de vez en cuando o añade un destino S3 en la pestaña *Backups* de la
+  base de datos en Coolify.
 - **Actualizaciones:** `unattended-upgrades` cubre los parches de seguridad; haz `sudo apt upgrade` de vez en
   cuando. Coolify se actualiza desde su panel (*Settings → Updates*, `/settings/updates`, donde también puedes
   activar la actualización automática).

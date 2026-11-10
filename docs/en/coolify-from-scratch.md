@@ -227,8 +227,11 @@ longer need it: `/coolify-ops:deploy-app decommission hello-fastapi`.
 
 - **Coolify's own data** (settings, apps, encrypted secrets): *Settings → Backup* (`/settings/backup`) — enable scheduled backups,
   ideally to S3-compatible storage outside the server.
-- **Your apps' databases** (e.g. the PostgreSQL ones this plugin creates): each database has its own *Backups*
-  tab with schedules and S3 destinations.
+- **Your apps' databases**: the PostgreSQL databases `deploy-app` creates get a daily backup on the server (the
+  last 7 are kept). Ask Claude «do I have backups of hello-fastapi?», «back it up now», «restore yesterday's data»
+  (it always asks first and backs up the current data before restoring) or «download a copy» (to
+  `~/.config/coolify-ops/backups/`). These backups live on the same server: for a copy that survives losing the
+  server, download one now and then, or add an S3 destination in the database's *Backups* tab in Coolify.
 - **Updates:** `unattended-upgrades` covers security patches; run `sudo apt upgrade` now and then. Coolify
   updates from its panel (*Settings → Updates*, `/settings/updates`, where you can also enable auto-update).
 - **Disk space:** Docker images pile up with every deployment. Coolify cleans them up on its own — check the

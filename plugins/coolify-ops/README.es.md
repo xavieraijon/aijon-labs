@@ -9,7 +9,7 @@ si hace falta y despliegue automático en cada push. Todo va por la API de Cooli
 
 | Skill | Cómo se invoca | Qué hace |
 |---|---|---|
-| `deploy-app` | `/coolify-ops:deploy-app` | Despliega y gestiona apps (estado, logs, actualizar, variables, rollback, retirar) |
+| `deploy-app` | `/coolify-ops:deploy-app` | Despliega y gestiona apps (estado, logs, actualizar, variables, rollback, copias de PostgreSQL y restaurarlas, retirar) |
 | `provision-server` | `/coolify-ops:provision-server` | Monta Coolify en un VPS o en casa paso a paso, comprobando cada paso (nunca usa contraseñas ni `sudo`) |
 
 ```
@@ -19,6 +19,7 @@ si hace falta y despliegue automático en cada push. Todo va por la API de Cooli
 > despliega ~/Projects/mi-tienda
 > /coolify-ops:deploy-app status
 > /coolify-ops:deploy-app logs mi-tienda
+> /coolify-ops:deploy-app backups mi-tienda
 > /coolify-ops:deploy-app decommission app-de-prueba
 ```
 Las órdenes de los scripts y de la skill están en inglés (`status`, `logs`, `decommission`…), pero puedes pedirlo
@@ -95,13 +96,18 @@ el comando para que lo lances tú (`! git push`).
 | `~/.config/coolify-ops/config.json` | URL de Coolify, dominio base, uuids del servidor y de la GitHub App, ssh, carpeta de proyectos, límites por defecto |
 | `~/.config/coolify-ops/apps.json` | Registro de las apps desplegadas (nombre → uuids, dominio) |
 | `~/.config/coolify-ops/secrets/<app>.env` | Valores de las variables de cada app (`chmod 600`; lo crea `coolify.py env-template` con las claves vacías, y los valores vacíos nunca se suben) |
+| `~/.config/coolify-ops/backups/<app>/` | Copias de la base de datos descargadas con `coolify.py backup-download` (carpeta 700, ficheros 600); contienen todos los datos de la app |
 
 Cambia la carpeta con `COOLIFY_OPS_HOME`. Una configuración de la v0.1 en `~/.config/coolify-deploy/` se migra
 sola.
 
 ## Seguridad
 
-- Una sola confirmación por despliegue; rollback, retirar y borrar variables preguntan siempre.
+- Una sola confirmación por despliegue; rollback, retirar, restaurar una copia de la base de datos, guardar menos
+  copias y borrar variables preguntan siempre.
+- Las bases de datos PostgreSQL nuevas tienen copias diarias en el servidor (se guardan las 7 últimas; nunca
+  ilimitadas). Antes de restaurar se hace una copia de los datos actuales. Las copias descargadas nunca van a un
+  repositorio git.
 - Bases de datos siempre privadas; nunca abre puertos ni usa subdominios reservados o en uso.
 - Busca secretos en los ficheros que se subirían y para si encuentra alguno.
 - Contraseñas y tokens enmascarados en toda la salida; los valores de las variables nunca se muestran.
