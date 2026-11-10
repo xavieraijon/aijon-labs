@@ -14,6 +14,7 @@ push. Everything goes through the Coolify API: no browser automation.
 
 ```
 > set up Coolify on my VPS user@203.0.113.10 with the domain example.org
+> set up Coolify on my home server user@192.168.1.20 with the domain yourname.duckdns.org
 > /coolify-ops:provision-server diagnose user@my-server
 > /coolify-ops:provision-server check
 > deploy ~/Projects/my-shop
@@ -22,6 +23,22 @@ push. Everything goes through the Coolify API: no browser automation.
 > /coolify-ops:deploy-app backups my-shop
 > /coolify-ops:deploy-app decommission test-app
 ```
+
+What a deployment looks like: Claude analyzes the project, writes a Dockerfile if it has none, builds and tests it
+on your machine, and shows you **one summary**:
+```
+App:          my-shop  (fastapi, python-fastapi template)
+Repo:         you/my-shop · branch main · 1 commit to push
+Domain:       https://my-shop.example.org   (available ✔)
+Database:     PostgreSQL 17 (new, private)
+Backups:      daily on the server, last 7 kept
+Resources:    max 1 CPU / 512m
+Auto-deploy:  yes (every push publishes)
+Local check:  OK (9 s build, routes / 200, /health 200)
+```
+After your «yes» it gives you the `git push` command; once you have run it, it creates everything on Coolify,
+deploys, and verifies HTTPS from outside. Setting up a server is guided, not automatic: `provision-server` checks
+every step while you run the `sudo` commands in your own terminal and do the router and browser steps.
 
 ## What it can deploy
 

@@ -15,60 +15,36 @@
 Un marketplace de plugins para [Claude Code](https://code.claude.com): skills, hooks y mods para autoalojar tus
 proyectos y automatizar el día a día. Cada plugin se instala por separado.
 
-| Plugin | Qué hace |
-|---|---|
-| [`coolify-ops`](plugins/coolify-ops/) | Gestiona tu propio servidor [Coolify](https://coolify.io) (un Heroku/Vercel autoalojado) desde Claude Code: móntalo en un VPS o en casa, y despliega tus proyectos con Dockerfile, dominio HTTPS, PostgreSQL opcional y despliegue automático en cada push, todo por la API de Coolify |
+## Instalar
 
-## Empezar
-
-En Claude Code:
+En Claude Code, añade el marketplace una vez y después instala los plugins que quieras:
 ```
 /plugin marketplace add xavieraijon/aijon-labs
-/plugin install coolify-ops@aijon-labs
+/plugin install <plugin>@aijon-labs
 ```
-En tu ordenador necesitas Python 3.10+, `git`, la CLI de GitHub `gh` (con sesión iniciada) y Docker para la
-prueba local ([requisitos](plugins/coolify-ops/README.es.md#requisitos)). Para desplegar hace falta antes un
-servidor con Coolify y un token de su API: si no lo tienes, empieza por la primera línea de abajo o por
-[¿Nuevo en Coolify?](#nuevo-en-coolify).
-Y después, pídelo con tus palabras:
-```
-> monta Coolify en mi VPS usuario@203.0.113.10 con el dominio ejemplo.org
-> monta Coolify en mi servidor de casa usuario@192.168.1.20 con el dominio tunombre.duckdns.org
-> despliega ~/Projects/mi-tienda
-> /coolify-ops:deploy-app status
-```
-Montar el servidor es guiado, no automático: la skill comprueba cada paso, y tú ejecutas las órdenes con `sudo` en
-tu propia terminal y haces los pasos del router y del navegador.
+Cada plugin se instala y actualiza por separado (`/plugin marketplace update aijon-labs` trae las versiones
+nuevas); sus skills aparecen como `/<plugin>:<skill>` y también se activan cuando lo pides con tus palabras.
 
-Así es un despliegue: Claude analiza el proyecto, le escribe un Dockerfile si no tiene, lo construye y lo prueba en
-tu máquina, y te enseña **un solo resumen**:
-```
-App:          mi-tienda  (fastapi, plantilla python-fastapi)
-Repo:         tu/mi-tienda · rama main · 1 commit por subir
-Dominio:      https://mi-tienda.ejemplo.org   (libre ✔)
-Base datos:   PostgreSQL 17 (nueva, privada)
-Recursos:     máx. 1 CPU / 512m
-Autodeploy:   sí (cada push publica)
-Prueba local: OK (9 s de build, rutas / 200, /health 200)
-```
-Tras tu «sí» te da la orden de `git push`; cuando la ejecutas, lo crea todo en Coolify, despliega y comprueba el
-HTTPS desde fuera.
+## Plugins
 
-## ¿Nuevo en Coolify?
+| Plugin | Qué hace | Para empezar |
+|---|---|---|
+| [`coolify-ops`](plugins/coolify-ops/README.es.md) | Gestiona tu propio servidor [Coolify](https://coolify.io) (un Heroku/Vercel autoalojado) desde Claude Code: móntalo en un VPS o en casa, y despliega tus proyectos con Dockerfile, dominio HTTPS, PostgreSQL opcional con copias de seguridad y despliegue automático en cada push, todo por la API de Coolify | [README](plugins/coolify-ops/README.es.md) · tutorial [Coolify desde cero](docs/es/coolify-desde-cero.md) · [app de ejemplo](examples/hello-fastapi/) |
 
-Sigue **[Coolify desde cero](docs/es/coolify-desde-cero.md)** —hardware, VPS o servidor en casa, DNS, seguridad,
-instalación, GitHub y la API— o deja que la skill `provision-server` te acompañe y compruebe cada paso. Después
-prueba con la [app de ejemplo](examples/hello-fastapi/).
+Versiones y cambios: [CHANGELOG](CHANGELOG.md) (en inglés) y
+[releases](https://github.com/xavieraijon/aijon-labs/releases) (etiquetas `<plugin>-v<versión>`).
 
-## Seguro por diseño
+## Cómo se comportan los plugins
 
-- Una sola confirmación por despliegue; borrar, rollback y force push preguntan siempre.
-- El `git push` lo haces siempre tú: las skills preparan el commit y te dan el comando.
+Todos los plugins de aquí siguen las mismas reglas:
+- Todo lo irreversible o que sale hacia fuera (borrar, restaurar, publicar) pregunta antes.
+- El `git push` y todo lo que publica lo haces tú: los plugins preparan el commit y te dan la orden.
 - Los tokens y contraseñas nunca pasan por el chat y se enmascaran en toda la salida.
-- Sin `sudo` ni contraseñas en los servidores, y sin aceptar claves ssh desconocidas.
-- Las bases de datos son privadas y nunca se abren puertos por ti.
+- En este repositorio no hay nada personal; tu configuración se queda en tu propia carpeta.
+- Los scripts solo usan la biblioteca estándar de Python y se prueban sin red.
 
-Más en [seguridad](docs/es/seguridad.md).
+El README de cada plugin detalla sus propias garantías. Más detalle, y cómo avisar de una vulnerabilidad, en
+[seguridad](docs/es/seguridad.md).
 
 ## Estructura
 

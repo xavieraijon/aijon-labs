@@ -14,6 +14,7 @@ si hace falta y despliegue automático en cada push. Todo va por la API de Cooli
 
 ```
 > monta Coolify en mi VPS usuario@203.0.113.10 con el dominio ejemplo.org
+> monta Coolify en mi servidor de casa usuario@192.168.1.20 con el dominio tunombre.duckdns.org
 > /coolify-ops:provision-server diagnose usuario@mi-servidor
 > /coolify-ops:provision-server check
 > despliega ~/Projects/mi-tienda
@@ -22,6 +23,22 @@ si hace falta y despliegue automático en cada push. Todo va por la API de Cooli
 > /coolify-ops:deploy-app backups mi-tienda
 > /coolify-ops:deploy-app decommission app-de-prueba
 ```
+
+Así es un despliegue: Claude analiza el proyecto, le escribe un Dockerfile si no tiene, lo construye y lo prueba en
+tu máquina, y te enseña **un solo resumen**:
+```
+App:          mi-tienda  (fastapi, plantilla python-fastapi)
+Repo:         tu/mi-tienda · rama main · 1 commit por subir
+Dominio:      https://mi-tienda.ejemplo.org   (libre ✔)
+Base datos:   PostgreSQL 17 (nueva, privada)
+Copias:       diarias en el servidor, se guardan las 7 últimas
+Recursos:     máx. 1 CPU / 512m
+Autodeploy:   sí (cada push publica)
+Prueba local: OK (9 s de build, rutas / 200, /health 200)
+```
+Tras tu «sí» te da la orden de `git push`; cuando la ejecutas, lo crea todo en Coolify, despliega y comprueba el
+HTTPS desde fuera. Montar un servidor es guiado, no automático: `provision-server` comprueba cada paso, y tú
+ejecutas las órdenes con `sudo` en tu propia terminal y haces los pasos del router y del navegador.
 Las órdenes de los scripts y de la skill están en inglés (`status`, `logs`, `decommission`…), pero puedes pedirlo
 todo en castellano: Claude te responde en tu idioma.
 

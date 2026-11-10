@@ -15,59 +15,36 @@
 A [Claude Code](https://code.claude.com) plugin marketplace: skills, hooks and mods for self-hosting and
 everyday automation. Each plugin installs on its own.
 
-| Plugin | What it does |
-|---|---|
-| [`coolify-ops`](plugins/coolify-ops/) | Run your own [Coolify](https://coolify.io) server (a self-hosted Heroku/Vercel) from Claude Code: set it up on a VPS or a home server, then deploy your projects with a Dockerfile, HTTPS domain, optional PostgreSQL and auto-deploy on every push — all through the Coolify API |
+## Install
 
-## Quick start
-
-In Claude Code:
+In Claude Code, add the marketplace once, then install the plugins you want:
 ```
 /plugin marketplace add xavieraijon/aijon-labs
-/plugin install coolify-ops@aijon-labs
+/plugin install <plugin>@aijon-labs
 ```
-On your computer you need Python 3.10+, `git`, the GitHub CLI `gh` (signed in) and Docker for the local build
-check ([requirements](plugins/coolify-ops/README.md#requirements)). Deploying needs a Coolify server and an API
-token first: if you have none, start with the first line below or with [New to Coolify?](#new-to-coolify).
-Then just ask:
-```
-> set up Coolify on my VPS user@203.0.113.10 with the domain example.org
-> set up Coolify on my home server user@192.168.1.20 with the domain yourname.duckdns.org
-> deploy ~/Projects/my-shop
-> /coolify-ops:deploy-app status
-```
-Setting up the server is guided, not automatic: the skill checks every step, while you run the `sudo` commands
-in your own terminal and do the router and browser steps.
+Each plugin installs and updates on its own (`/plugin marketplace update aijon-labs` fetches new versions); its
+skills appear as `/<plugin>:<skill>` and also trigger when you ask in your own words.
 
-What a deployment looks like: Claude analyzes the project, writes a Dockerfile if it has none, builds and tests it
-on your machine, and shows you **one summary**:
-```
-App:          my-shop  (fastapi, python-fastapi template)
-Repo:         you/my-shop · branch main · 1 commit to push
-Domain:       https://my-shop.example.org   (available ✔)
-Database:     PostgreSQL 17 (new, private)
-Resources:    max 1 CPU / 512m
-Auto-deploy:  yes (every push publishes)
-Local check:  OK (9 s build, routes / 200, /health 200)
-```
-After your «yes» it gives you the `git push` command; once you have run it, it creates everything on Coolify,
-deploys, and verifies HTTPS from outside.
+## Plugins
 
-## New to Coolify?
+| Plugin | What it does | Get started |
+|---|---|---|
+| [`coolify-ops`](plugins/coolify-ops/) | Run your own [Coolify](https://coolify.io) server (a self-hosted Heroku/Vercel) from Claude Code: set it up on a VPS or a home server, then deploy your projects with a Dockerfile, HTTPS domain, optional PostgreSQL with backups and auto-deploy on every push — all through the Coolify API | [README](plugins/coolify-ops/) · tutorial [Coolify from scratch](docs/en/coolify-from-scratch.md) · [example app](examples/hello-fastapi/) |
 
-Follow **[Coolify from scratch](docs/en/coolify-from-scratch.md)** — hardware, VPS vs. home server, DNS,
-hardening, install, GitHub and the API — or let the `provision-server` skill walk you through it and check every
-step. Then try the bundled [example app](examples/hello-fastapi/).
+Versions and changes: [CHANGELOG](CHANGELOG.md) and [releases](https://github.com/xavieraijon/aijon-labs/releases)
+(tagged `<plugin>-v<version>`).
 
-## Safety by design
+## How the plugins behave
 
-- One confirmation per deployment; delete, rollback and force push always ask.
-- `git push` is always yours: the skills prepare the commit and give you the command.
+Every plugin here follows the same rules:
+- Anything irreversible or outward-facing (deleting, restoring, publishing) asks first.
+- `git push` and anything that publishes are yours: the plugins prepare the commit and give you the command.
 - Tokens and passwords never go through the chat and are masked in all output.
-- No `sudo`, no passwords on servers, no unknown ssh host keys accepted.
-- Databases stay private; ports are never opened for you.
+- Nothing personal lives in this repository; your settings stay in your own config folder.
+- Scripts use only the Python standard library and are tested offline.
 
-More in [SECURITY.md](SECURITY.md).
+Each plugin's README lists its own guarantees. Details, and how to report a vulnerability, in
+[SECURITY.md](SECURITY.md).
 
 ## Repository layout
 
