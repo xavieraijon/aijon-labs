@@ -12,24 +12,26 @@
 [![CI](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml/badge.svg)](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A [Claude Code](https://code.claude.com) plugin marketplace: skills, hooks and mods for self-hosting and
-everyday automation. Each plugin installs on its own.
+A [Claude Code](https://code.claude.com) plugin marketplace. Today it has one plugin, `coolify-ops`, for
+self-hosted deployments; more plugins (skills, hooks and interface mods) are planned, and each installs on its
+own.
 
 ## Install
 
-In Claude Code, add the marketplace once, then install the plugins you want:
+In Claude Code, add the marketplace once, then install the plugins you want, for example:
 ```
 /plugin marketplace add xavieraijon/aijon-labs
-/plugin install <plugin>@aijon-labs
+/plugin install coolify-ops@aijon-labs
 ```
-Each plugin installs and updates on its own (`/plugin marketplace update aijon-labs` fetches new versions); its
-skills appear as `/<plugin>:<skill>` and also trigger when you ask in your own words.
+Then run `/reload-plugins` (or restart Claude Code): typing `/coolify-ops:` now lists its skills, and they also
+trigger when you ask in your own words. To update later: `/plugin marketplace update aijon-labs` refreshes the
+catalogue, `/plugin update coolify-ops@aijon-labs` installs the new version (restart to apply).
 
 ## Plugins
 
-| Plugin | What it does | Get started |
-|---|---|---|
-| [`coolify-ops`](plugins/coolify-ops/) | Run your own [Coolify](https://coolify.io) server (a self-hosted Heroku/Vercel) from Claude Code: set it up on a VPS or a home server, then deploy your projects with a Dockerfile, HTTPS domain, optional PostgreSQL with backups and auto-deploy on every push — all through the Coolify API | [README](plugins/coolify-ops/) · tutorial [Coolify from scratch](docs/en/coolify-from-scratch.md) · [example app](examples/hello-fastapi/) |
+| Plugin | What it does | You need | Get started |
+|---|---|---|---|
+| [`coolify-ops`](plugins/coolify-ops/) | Run your own [Coolify](https://coolify.io) server (a self-hosted Heroku/Vercel) from Claude Code: set it up on a VPS or a home server, then deploy your projects to it — it writes the Dockerfile if missing (FastAPI, Django, Laravel, Next.js, Nuxt, SPAs and more) — with an HTTPS domain, optional PostgreSQL with backups and auto-deploy on every push, all through the Coolify API | A VPS or home server, a domain, GitHub (`gh` signed in), and Docker and Python 3.10+ on your computer ([details](plugins/coolify-ops/README.md#requirements)) | [README](plugins/coolify-ops/) · tutorial [Coolify from scratch](docs/en/coolify-from-scratch.md) · [example app](examples/hello-fastapi/) (once the server is set up) |
 
 Versions and changes: [CHANGELOG](CHANGELOG.md) and [releases](https://github.com/xavieraijon/aijon-labs/releases)
 (tagged `<plugin>-v<version>`).

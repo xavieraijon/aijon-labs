@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "aijon-labs",
-  "description": "Skills, hooks and mods for Claude Code by Xavi Aijon: self-hosted deployments, automation and interface tweaks.",
+  "description": "Claude Code plugins by Xavi Aijon. Today: coolify-ops, to set up a self-hosted Coolify server and deploy your projects to it.",
   "owner": {
     "name": "Xavi Aijon",
     "url": "https://github.com/xavieraijon"
