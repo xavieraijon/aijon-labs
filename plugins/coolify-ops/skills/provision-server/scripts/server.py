@@ -63,7 +63,7 @@ echo DOCKER="$(docker --version 2>/dev/null | awk '{print $3}' | tr -d ,)"
 echo DOCKER_ACCESS="$(docker info >/dev/null 2>&1 && echo yes || echo no)"
 echo COOLIFY="$(docker inspect -f '{{.State.Health.Status}}' coolify 2>/dev/null)"
 echo COOLIFY_DIR="$(test -d /data/coolify && echo yes || echo no)"
-echo LISTEN="$(ss -Hltn 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
+echo LISTEN="$(ss -Hltn 2>/dev/null | awk '$4 !~ /^(127\.|\[::1\])/ {print $4}' | sed 's/.*://' | sort -un | tr '\n' ',')"
 echo PUBLIC_IP="$(curl -4 -s --max-time 6 https://ifconfig.me 2>/dev/null)"
 echo LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 F="/etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config"  # sshd keeps the first value it reads; conf.d is included first
@@ -160,7 +160,7 @@ def evaluate(facts: dict) -> dict:
     pwd = facts.get("SSH_PASSWORD") or "yes (default)"
     check("ssh_password_login_disabled", pwd == "no", f"PasswordAuthentication {pwd}")
     if pwd != "no":
-        warnings.append("ssh still accepts passwords: disable them (step 4 of the guide)")
+        warnings.append("ssh still accepts passwords: disable them (hardening, «Key-only ssh» block)")
     ufw = facts.get("UFW") == "active"
     check("firewall", ufw, "ufw active" if ufw else "ufw not active")
     if not ufw:
@@ -169,7 +169,7 @@ def evaluate(facts: dict) -> dict:
     unattended = facts.get("UNATTENDED") == "yes"
     check("automatic_updates", unattended, "unattended-upgrades installed" if unattended else "not installed")
     if not unattended:
-        warnings.append("automatic security updates are not installed (step 4 of the guide)")
+        warnings.append("automatic security updates are not installed (hardening, «Automatic security updates» block)")
 
     public_ip = facts.get("PUBLIC_IP") or None
     lan_ip = facts.get("LAN_IP") or None
@@ -184,7 +184,8 @@ def evaluate(facts: dict) -> dict:
                            "router; if they differ you are behind CGNAT and port forwarding will not work")
             if behind_nat else None,
             "checks": checks, "warnings": warnings, "blockers": blockers,
-            "ready_to_install": stage == "not-installed" and not blockers}
+            "ready_to_install": stage == "not-installed" and not blockers,
+            "listening": sorted(listening)}  # TCP ports in use, except localhost-only: candidates for «ports --private»
 
 
 def cmd_diagnose(a) -> dict:

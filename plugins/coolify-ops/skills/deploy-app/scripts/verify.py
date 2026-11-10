@@ -151,6 +151,7 @@ def main() -> None:
         res["certificate"] = certificate(host)
         code, location = fetch(f"http://{host}/", follow=False)
         res["http_to_https"] = {"code": code, "ok": code in (301, 302, 307, 308) and location.startswith("https://")}
+        a.routes = a.routes or ["/"]  # «--routes» with nothing after it: probe the home page
         res["routes"] = {r: fetch(url.rstrip("/") + r)[0] for r in a.routes}
         if a.external:
             res["external"] = external(url.rstrip("/") + a.routes[0])

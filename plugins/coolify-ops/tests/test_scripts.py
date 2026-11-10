@@ -675,3 +675,13 @@ def test_local_check_failures_exit_non_zero(tmp_path, docker, monkeypatch, capsy
         local_check.main([str(tmp_path), "--port", "1", "--expect", "ng-server-context"])
     res = json.loads(capsys.readouterr().out)
     assert e.value.code == 1 and res["marker_found"] is False and res["stage"] == "routes"
+
+
+def test_check_keeps_the_saved_values_when_the_api_fails(config, monkeypatch):
+    coolify.write_json(coolify.CONFIG, {**coolify.read_json(coolify.CONFIG, {}), "ssh": "user@server"})
+
+    def down(*a, **k):
+        raise coolify.Error("Cannot reach Coolify at http://203.0.113.5:8000")
+    monkeypatch.setattr(coolify, "api", down)
+    r = coolify.cmd_check(argparse.Namespace())
+    assert not r["ok"] and "Cannot reach" in r["error"] and r["ssh"] == "user@server" and r["url"]

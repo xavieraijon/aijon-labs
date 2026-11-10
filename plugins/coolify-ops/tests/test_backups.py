@@ -35,6 +35,8 @@ class FakeCoolify:
         base = f"/databases/{DB}"
         if path == "/version":
             return {"text": self.version}
+        if path.startswith("/servers/"):
+            return {"settings": {"server_timezone": "Europe/Madrid"}}
         if (method, path) == ("GET", base):
             return {"uuid": DB, "database_type": self.db_type, "status": self.db_status}
         if (method, path) == ("GET", f"{base}/backups"):
@@ -645,3 +647,24 @@ def test_init_again_keeps_the_saved_server_and_github_app(config, monkeypatch):
     cfg = coolify.read_json(coolify.CONFIG, {})
     assert r["server"] == "vps" and cfg["server_uuid"] == "s1" and cfg["github_app_uuid"] == "g1"
     assert cfg["ssh"] == "user@server"
+
+
+def test_status_reports_the_server_timezone_for_crons(fake, config):
+    coolify.write_json(coolify.CONFIG, {**coolify.read_json(coolify.CONFIG, {}), "server_uuid": "srv1"})
+    assert coolify.cmd_backup_status(ns())["timezone"] == "Europe/Madrid"
+    assert ("GET", "/servers/srv1", None) in fake.calls
+
+
+def test_verify_with_empty_routes_probes_the_home_page(monkeypatch, capsys):
+    import json
+    import sys
+
+    import verify
+    monkeypatch.setattr(verify, "certificate", lambda host: {"valid": True})
+    monkeypatch.setattr(verify, "fetch", lambda url, follow=True: (200, "") if follow else (301, "https://x/"))
+    monkeypatch.setattr(verify, "external", lambda url: {"in1": "200"})
+    monkeypatch.setattr(verify.time, "sleep", lambda s: None)
+    monkeypatch.setattr(sys, "argv", ["verify.py", "https://app.example.org", "--routes", "--external", "--wait", "0"])
+    verify.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["routes"] == {"/": 200} and out["ok"]

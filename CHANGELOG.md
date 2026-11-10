@@ -6,7 +6,7 @@ All notable changes to the plugins of this marketplace. The format is based on
 
 ## coolify-ops
 
-### Unreleased (0.3.0)
+### 0.3.0 — 2026-11-10
 
 #### Added
 - `deploy-app` deploys Nuxt, Astro, SvelteKit, Angular with SSR and React Router (framework mode) without a
@@ -85,6 +85,11 @@ All notable changes to the plugins of this marketplace. The format is based on
   backup after a Django or Laravel rollback.
 
 #### Changed
+- `backup-status` reports the server's `timezone` (backup crons run in it); `check` also prints `base_domain` and
+  `ssh`.
+- `provision-server` check mode tests the server's own IP (not the DNS answer, which may be a proxy), the ports it
+  listens on, and requires filtered panel ports on a VPS; the tutorial and the skill cover proxied DNS records,
+  router port forwarding, the DuckDNS updater and a missing ssh key.
 - `nginx-spa.conf` falls back to the file the framework writes for client-side routes (`index.html`, `200.html`,
   `index.csr.html`, `__spa-fallback.html`) and no HTML page is cached. Static sites that are not single-page apps
   get `nginx-static.conf`, which now serves the site's own `404.html`.
@@ -113,6 +118,9 @@ All notable changes to the plugins of this marketplace. The format is based on
   of the image, the analysis and the `.gitignore` written for new repositories.
 
 #### Fixed
+- `verify.py --routes` with no route after it crashed with `--external`; it now probes `/`.
+- `provision-server` health checks on a VPS could never pass when the ssh user is not in the docker group: the
+  skill now says how to check through the panel instead.
 - `init` run again (e.g. to add `--ssh`) keeps the saved server and GitHub App instead of picking `localhost` and
   the first app.
 - Build-time variables (`VITE_*`, `NEXT_PUBLIC_*`, `NUXT_PUBLIC_*`, `REACT_APP_*`, SvelteKit's `$env/static`) never

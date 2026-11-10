@@ -204,3 +204,7 @@ def test_rate_limit_backs_off_and_retries(monkeypatch):
     monkeypatch.setattr(server.time, "sleep", sleeps.append)
     assert server.tcp_from_internet("example.org", [443])[443]["state"] == "open"
     assert sleeps.count(server.RATE_LIMIT_WAIT) == 2
+
+
+def test_diagnose_lists_listening_ports_for_the_exposure_check():
+    assert server.evaluate(facts(LISTEN="22,80,443,5432,"))["listening"] == [22, 80, 443, 5432]

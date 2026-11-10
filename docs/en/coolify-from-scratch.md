@@ -47,9 +47,11 @@ Hetzner, DigitalOcean, Vultr, OVH, AWS, …) — you will need it in step 4.
   `curl -4 ifconfig.me` and compare it with the WAN IP on your router's status page. If they differ, you are
   behind CGNAT and port forwarding cannot work: ask your ISP for a public IP (often free on request) or use a
   tunnel (e.g. Cloudflare Tunnel, outside the scope of this guide).
-- **Give the server a fixed address on your LAN** (a DHCP reservation in the router) so port forwarding keeps
-  working after a reboot.
-- **Forward ports 80 and 443 only** on your router to that LAN address. Never forward Coolify's panel port.
+- **Give the server a fixed address on your LAN** (a «DHCP reservation» or «static lease» in the router) so port
+  forwarding keeps working after a reboot.
+- **Forward ports 80 and 443 only** on your router to that LAN address: TCP 80 → `<server-lan-ip>`:80 and TCP 443 →
+  `<server-lan-ip>`:443. The menu is usually called «Port forwarding», «Virtual server» or «NAT». Never a range,
+  never Coolify's panel port. The `provision-server` skill checks from abroad that these two are open and the panel ports are not.
 - To open your apps from inside your own network by their public name, the router needs **NAT loopback**
   (hairpinning). Most routers support it; if `https://<your-domain>` does not load from inside the LAN but works
   from your phone's mobile data, that is the reason.
@@ -62,8 +64,19 @@ subdomain automatically (`shop.example.org`, `blog.example.org`, …) without to
 - **Your own domain** (recommended if you plan to keep this server): at your DNS provider, add an `A` record
   `*.example.org` pointing at the server's public IP. One record covers every future subdomain.
 - **Free option**: [DuckDNS](https://www.duckdns.org) gives you `yourname.duckdns.org`, where every subdomain
-  (`*.yourname.duckdns.org`) resolves too, plus a small client that keeps the IP updated if it changes — useful
-  at home. Any dynamic DNS service with wildcard support works the same way.
+  (`*.yourname.duckdns.org`) resolves too, with no extra record. Any dynamic DNS service with wildcard support
+  works the same way.
+- **At home, keep the IP up to date**: a home IP changes now and then, and every app stops answering when DNS
+  still points at the old one. Use your router's dynamic DNS setting if it supports your provider; otherwise, for
+  DuckDNS, a cron job on the server (the token stays in a file, never in a chat):
+  ```bash
+  mkdir -p ~/.duckdns && chmod 700 ~/.duckdns
+  nano ~/.duckdns/token && chmod 600 ~/.duckdns/token       # paste the token from duckdns.org, save
+  (crontab -l 2>/dev/null; echo '*/5 * * * * curl -fsS "https://www.duckdns.org/update?domains=yourname&token=$(cat ~/.duckdns/token)" >/dev/null') | crontab -
+  ```
+- **With a DNS provider that can proxy traffic** (Cloudflare's orange cloud), set the wildcard record to **DNS
+  only**: a proxied record answers with the proxy's addresses instead of your server's, so the checks in this guide
+  would test the proxy, and the proxy's own HTTPS settings can get in the way of Coolify's certificates.
 
 Wait for it to propagate (minutes to a couple of hours) and check it:
 ```bash
@@ -76,7 +89,7 @@ It must print the server's **public** IP.
 Do this before installing Coolify. Run it in an ssh session on the server.
 
 **SSH with keys only.** First, from your own computer, copy your key and check that it logs you in without a
-password:
+password (no key yet? create one with `ssh-keygen -t ed25519` and accept the default path):
 ```bash
 ssh-copy-id user@server
 ssh user@server            # must not ask for the account password
@@ -106,7 +119,8 @@ sudo dpkg-reconfigure --priority=low unattended-upgrades
 
 ## 5 · Install Coolify
 
-Coolify installs with one official script, which also installs Docker if it is missing:
+Coolify installs with one official script, which also installs Docker if it is missing. Run it **on the server**
+(in your ssh session), not on your computer:
 ```bash
 curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
 ```
@@ -166,7 +180,9 @@ stay private, so we publish **only the webhook path** on a dedicated subdomain, 
    `rule` line.
 2. **Create the GitHub App.** *Sources → Add → GitHub App*, follow the link to GitHub and let it create the app;
    Coolify receives the credentials automatically. Install it on your account choosing **only the repositories**
-   you will deploy (you can add more later).
+   you will deploy (or *All repositories* on a personal account). With selected repositories, each new one must be added later
+   (GitHub → *Settings → Applications → Installed GitHub Apps → your app → Configure → Repository access*): the
+   plugin tells you when.
 3. **Point the webhooks at the public URL.** On GitHub: *Settings → Developer settings → GitHub Apps → your app →
    Webhook URL* = `https://hooks.example.org/webhooks/source/github/events`. Save.
 
@@ -214,7 +230,8 @@ check the server's health, clean up thoroughly when you delete an app, and resto
 Then try the example app that ships with this repository. Coolify deploys from a GitHub repository, so copy it into
 its own folder first (the plugin will create a private repo for it and give you the push command):
 ```bash
-cp -r examples/hello-fastapi ~/Projects/hello-fastapi
+d=$(mktemp -d) && git clone --depth 1 https://github.com/xavieraijon/aijon-labs "$d/aijon-labs" \
+  && cp -r "$d/aijon-labs/examples/hello-fastapi" ~/Projects/hello-fastapi && rm -rf "$d"
 ```
 ```
 Deploy ~/Projects/hello-fastapi

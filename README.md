@@ -26,12 +26,18 @@ In Claude Code:
 /plugin marketplace add xavieraijon/aijon-labs
 /plugin install coolify-ops@aijon-labs
 ```
+On your computer you need Python 3.10+, `git`, the GitHub CLI `gh` (signed in) and Docker for the local build
+check ([requirements](plugins/coolify-ops/README.md#requirements)). Deploying needs a Coolify server and an API
+token first: if you have none, start with the first line below or with [New to Coolify?](#new-to-coolify).
 Then just ask:
 ```
 > set up Coolify on my VPS user@203.0.113.10 with the domain example.org
+> set up Coolify on my home server user@192.168.1.20 with the domain yourname.duckdns.org
 > deploy ~/Projects/my-shop
 > /coolify-ops:deploy-app status
 ```
+Setting up the server is guided, not automatic: the skill checks every step, while you run the `sudo` commands
+in your own terminal and do the router and browser steps.
 
 What a deployment looks like: Claude analyzes the project, writes a Dockerfile if it has none, builds and tests it
 on your machine, and shows you **one summary**:
@@ -44,7 +50,8 @@ Resources:    max 1 CPU / 512m
 Auto-deploy:  yes (every push publishes)
 Local check:  OK (9 s build, routes / 200, /health 200)
 ```
-After your «yes» it creates everything on Coolify, deploys, and verifies HTTPS from outside.
+After your «yes» it gives you the `git push` command; once you have run it, it creates everything on Coolify,
+deploys, and verifies HTTPS from outside.
 
 ## New to Coolify?
 

@@ -55,7 +55,7 @@ New to Coolify? Start with [Coolify from scratch](../../docs/en/coolify-from-scr
 ## Requirements
 
 - Python 3.10+, `git`, [`gh`](https://cli.github.com) signed in, and Docker (for the local build check).
-- A server running Coolify v4 with a GitHub App source, a wildcard domain (`*.example.org`) pointing at it and
+- A server running Coolify v4 (4.6.0 or later for database backups) with a GitHub App source, a wildcard domain (`*.example.org`) pointing at it and
   ports 80/443 open for HTTPS.
 - Network access from your machine to the Coolify API (same LAN or VPN, or a public panel URL).
 
@@ -121,7 +121,7 @@ All print JSON and can be used by hand. They live in `skills/deploy-app/scripts/
 | `coolify.py` | API client (`coolify.py --help` lists the commands) |
 | `repo.py state\|init\|commit <path>` | Local git for the skill: state, `git init` with a `.gitignore`, commit after a secrets scan. It has no push |
 | `analyze.py <path>` | Project analysis; `--secrets` only scans for secrets |
-| `prepare.py <path>` | Writes Dockerfile, `.dockerignore` and `nginx.conf` from the templates |
+| `prepare.py <path>` | Writes Dockerfile, `.dockerignore`, `nginx.conf`, `coolify_settings.py` (Django) and `config/trustedproxy.php` (Laravel) from the templates |
 | `local_check.py <path> --port N` | Local Docker build and run; always cleans up |
 | `verify.py https://host` | Certificate, redirect, routes, `--external` (check-host.net) and `--server` (ssh) |
 

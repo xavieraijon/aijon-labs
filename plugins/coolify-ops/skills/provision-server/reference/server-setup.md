@@ -36,8 +36,8 @@ Recommended: create a normal user for everyday ssh and for this plugin, then log
 adduser deploy && usermod -aG sudo deploy          # as root; install sudo first if missing: apt install -y sudo
 mkdir -p /home/deploy/.ssh && cp ~/.ssh/authorized_keys /home/deploy/.ssh/ && chown -R deploy: /home/deploy/.ssh
 ```
-After Coolify is installed (it installs Docker), `usermod -aG docker deploy` lets the plugin's checks see the
-containers. **The docker group is equivalent to root.** For least privilege, give the plugin a separate ssh user
+After Coolify is installed (it installs Docker), `sudo usermod -aG docker <user>` (without `sudo` as root;
+`<user>` = the ssh user of the plugin) lets the plugin's checks see the containers, from the next ssh login. **The docker group is equivalent to root.** For least privilege, give the plugin a separate ssh user
 without `sudo` and without the docker group: the checks then rely on the panel's health URL instead.
 
 Then, **on the server**, disable password logins with a drop-in. sshd keeps the first value it reads and
@@ -47,6 +47,18 @@ echo "PasswordAuthentication no" | sudo tee /etc/ssh/sshd_config.d/00-key-only.c
 sudo systemctl restart ssh
 ```
 Keep that session open and check from a **new** terminal that login still works before closing it.
+
+## Dynamic DNS (home, step D)
+
+A home IP changes from time to time; DNS must follow it. Best: the router's own dynamic DNS setting, if it
+supports the provider. Otherwise, for DuckDNS, on the server (the token is on duckdns.org; paste it in the file,
+never in a chat):
+```bash
+mkdir -p ~/.duckdns && chmod 700 ~/.duckdns
+nano ~/.duckdns/token && chmod 600 ~/.duckdns/token       # paste the token, save
+(crontab -l 2>/dev/null; echo '*/5 * * * * curl -fsS "https://www.duckdns.org/update?domains=<name>&token=$(cat ~/.duckdns/token)" >/dev/null') | crontab -
+```
+`<name>` is the part before `.duckdns.org`. The wildcard (`*.<name>.duckdns.org`) needs no extra record.
 
 ## Automatic security updates (step C)
 

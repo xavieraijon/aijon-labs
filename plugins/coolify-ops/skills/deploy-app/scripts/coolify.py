@@ -216,10 +216,14 @@ def host_of(url_or_host: str) -> str:
 
 
 def cmd_check(_a):
-    version = api("GET", "/version")
-    projects = api("GET", "/projects")
     cfg = config()
-    return {"ok": True, "coolify": version.get("text", version), "url": cfg["url"],
+    saved = {"url": cfg["url"], "base_domain": cfg.get("base_domain"), "ssh": cfg.get("ssh")}
+    try:
+        version = api("GET", "/version")
+        projects = api("GET", "/projects")
+    except Error as e:  # the API failed, but the saved values are still useful (provision-server check mode)
+        return {"ok": False, "error": str(e), **saved}
+    return {"ok": True, "coolify": version.get("text", version), **saved,
             "projects": len(projects) if isinstance(projects, list) else None}
 
 
@@ -900,6 +904,15 @@ def _origin(cfg: dict) -> str:
     return {TIMEOUT_SCHEDULED: "scheduled", TIMEOUT_MANUAL: "manual"}.get(cfg.get("timeout"), "other")
 
 
+def _server_timezone() -> str | None:
+    """Coolify runs backup crons in the server's timezone (Settings of the server; UTC by default)."""
+    server = (read_json(CONFIG, {}) or {}).get("server_uuid")
+    try:
+        return ((api("GET", f"/servers/{server}") or {}).get("settings") or {}).get("server_timezone") if server else None
+    except Error:
+        return None
+
+
 def _configs(db: str) -> list[dict]:
     r = api("GET", f"/databases/{db}/backups")
     return r if isinstance(r, list) else []
@@ -940,6 +953,7 @@ def cmd_backup_status(a):
                      if e.get("status") == "failed"), reverse=True)
     last_failed = failed[0] if failed and (not last_success or failed[0] > str(last_success)) else None
     return {"ok": True, "db_uuid": db, "database_status": info.get("status"), "schedules": schedules,
+            "timezone": _server_timezone(),
             "has_schedule": any(s["origin"] == "scheduled" for s in schedules),
             "has_any_schedule": any(s["enabled"] for s in schedules), "backups": backups,
             "last_success_at": last_success, "last_failed_at": last_failed}

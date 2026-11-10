@@ -57,7 +57,7 @@ configuración de abajo, o deja que te guíe la skill `provision-server`.
 ## Requisitos
 
 - Python 3.10+, `git`, [`gh`](https://cli.github.com) con sesión iniciada, y Docker (para la prueba local).
-- Un servidor con Coolify v4 y una GitHub App como fuente, un dominio con comodín (`*.ejemplo.org`) apuntando a él
+- Un servidor con Coolify v4 (4.6.0 o posterior para las copias de la base de datos) y una GitHub App como fuente, un dominio con comodín (`*.ejemplo.org`) apuntando a él
   y los puertos 80/443 abiertos para el HTTPS.
 - Acceso de red desde tu máquina a la API de Coolify (misma red local o VPN, o un panel con URL pública).
 
@@ -125,7 +125,7 @@ Todos devuelven JSON y se pueden usar a mano. Están en `skills/deploy-app/scrip
 | `coolify.py` | Cliente de la API (`coolify.py --help` lista las órdenes) |
 | `repo.py state\|init\|commit <ruta>` | Git local para la skill: estado, `git init` con `.gitignore` y commit tras buscar secretos. No tiene push |
 | `analyze.py <ruta>` | Análisis del proyecto; `--secrets` solo busca secretos |
-| `prepare.py <ruta>` | Escribe Dockerfile, `.dockerignore` y `nginx.conf` desde las plantillas |
+| `prepare.py <ruta>` | Escribe Dockerfile, `.dockerignore`, `nginx.conf`, `coolify_settings.py` (Django) y `config/trustedproxy.php` (Laravel) desde las plantillas |
 | `local_check.py <ruta> --port N` | Build y prueba con Docker en local; limpia siempre |
 | `verify.py https://host` | Certificado, redirección, rutas, `--external` (check-host.net) y `--server` (ssh) |
 

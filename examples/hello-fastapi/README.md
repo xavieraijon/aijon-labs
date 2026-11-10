@@ -7,7 +7,8 @@ skill writes one from its `python-fastapi` template.
 Coolify deploys from a GitHub repository, so copy it into its own folder first and let the skill create the repo:
 
 ```bash
-cp -r examples/hello-fastapi ~/Projects/hello-fastapi
+d=$(mktemp -d) && git clone --depth 1 https://github.com/xavieraijon/aijon-labs "$d/aijon-labs" \
+  && cp -r "$d/aijon-labs/examples/hello-fastapi" ~/Projects/hello-fastapi && rm -rf "$d"
 ```
 Then, in Claude Code:
 ```
@@ -18,5 +19,5 @@ The optional `GREETING` variable changes the text on the home page (see `.env.ex
 ---
 
 *Una app mínima de FastAPI para probar `coolify-ops` de principio a fin. No trae Dockerfile a propósito: lo
-escribe la skill `deploy-app`. Cópiala a su propia carpeta (`cp -r examples/hello-fastapi ~/Projects/hello-fastapi`)
+escribe la skill `deploy-app`. Cópiala a su propia carpeta con las órdenes de arriba (`git clone` y `cp -r`)
 y pide a Claude «despliega ~/Projects/hello-fastapi».*

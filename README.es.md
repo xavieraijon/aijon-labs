@@ -26,12 +26,19 @@ En Claude Code:
 /plugin marketplace add xavieraijon/aijon-labs
 /plugin install coolify-ops@aijon-labs
 ```
+En tu ordenador necesitas Python 3.10+, `git`, la CLI de GitHub `gh` (con sesión iniciada) y Docker para la
+prueba local ([requisitos](plugins/coolify-ops/README.es.md#requisitos)). Para desplegar hace falta antes un
+servidor con Coolify y un token de su API: si no lo tienes, empieza por la primera línea de abajo o por
+[¿Nuevo en Coolify?](#nuevo-en-coolify).
 Y después, pídelo con tus palabras:
 ```
 > monta Coolify en mi VPS usuario@203.0.113.10 con el dominio ejemplo.org
+> monta Coolify en mi servidor de casa usuario@192.168.1.20 con el dominio tunombre.duckdns.org
 > despliega ~/Projects/mi-tienda
 > /coolify-ops:deploy-app status
 ```
+Montar el servidor es guiado, no automático: la skill comprueba cada paso, y tú ejecutas las órdenes con `sudo` en
+tu propia terminal y haces los pasos del router y del navegador.
 
 Así es un despliegue: Claude analiza el proyecto, le escribe un Dockerfile si no tiene, lo construye y lo prueba en
 tu máquina, y te enseña **un solo resumen**:
@@ -44,7 +51,8 @@ Recursos:     máx. 1 CPU / 512m
 Autodeploy:   sí (cada push publica)
 Prueba local: OK (9 s de build, rutas / 200, /health 200)
 ```
-Tras tu «sí» lo crea todo en Coolify, despliega y comprueba el HTTPS desde fuera.
+Tras tu «sí» te da la orden de `git push`; cuando la ejecutas, lo crea todo en Coolify, despliega y comprueba el
+HTTPS desde fuera.
 
 ## ¿Nuevo en Coolify?
 

@@ -47,9 +47,12 @@ todos: Hetzner, DigitalOcean, Vultr, OVH, AWS…): lo necesitarás en el paso 4.
   `curl -4 ifconfig.me` y compáralo con la IP WAN de la página de estado de tu router. Si son distintas, estás
   detrás de CGNAT y el reenvío de puertos no puede funcionar: pide una IP pública a tu operador (a menudo es
   gratis si la pides) o usa un túnel (p. ej. Cloudflare Tunnel, fuera del alcance de esta guía).
-- **Dale al servidor una dirección fija en tu red** (una reserva DHCP en el router) para que el reenvío de
-  puertos siga funcionando después de un reinicio.
-- **Reenvía solo los puertos 80 y 443** del router a esa dirección. Nunca reenvíes el puerto del panel de Coolify.
+- **Dale al servidor una dirección fija en tu red** (una «reserva DHCP» o «IP estática» en el router) para que el
+  reenvío de puertos siga funcionando después de un reinicio.
+- **Reenvía solo los puertos 80 y 443** del router a esa dirección: TCP 80 → `<ip-del-servidor>`:80 y TCP 443 →
+  `<ip-del-servidor>`:443. El menú suele llamarse «Reenvío de puertos», «Port forwarding», «Servidor virtual» o
+  «NAT». Nunca un rango ni el puerto del panel de Coolify. La skill `provision-server` comprueba desde fuera que
+  esos dos están abiertos y los del panel no.
 - Para abrir tus apps desde dentro de tu propia red por su nombre público, el router necesita **NAT loopback**
   (hairpinning). La mayoría lo admiten; si `https://<tu-dominio>` no carga desde dentro de casa pero sí desde los
   datos móviles del teléfono, es por esto.
@@ -62,8 +65,20 @@ subdominio automáticamente (`tienda.ejemplo.org`, `blog.ejemplo.org`…) sin vo
 - **Tu propio dominio** (recomendado si vas a mantener este servidor): en tu proveedor de DNS, añade un registro
   `A` `*.ejemplo.org` apuntando a la IP pública del servidor. Un solo registro cubre cualquier subdominio futuro.
 - **Opción gratuita**: [DuckDNS](https://www.duckdns.org) te da `tunombre.duckdns.org`, donde también resuelve
-  cualquier subdominio (`*.tunombre.duckdns.org`), y un pequeño cliente que mantiene la IP al día si cambia
-  (útil en casa). Cualquier DNS dinámico con comodín funciona igual.
+  cualquier subdominio (`*.tunombre.duckdns.org`) sin ningún registro más. Cualquier DNS dinámico con comodín
+  funciona igual.
+- **En casa, mantén la IP al día**: la IP de casa cambia de vez en cuando, y si el DNS sigue apuntando a la
+  antigua ninguna app responde. Usa el DNS dinámico del router si admite tu proveedor; si no, para DuckDNS, una
+  tarea cron en el servidor (el token queda en un fichero, nunca en un chat):
+  ```bash
+  mkdir -p ~/.duckdns && chmod 700 ~/.duckdns
+  nano ~/.duckdns/token && chmod 600 ~/.duckdns/token       # pega el token de duckdns.org y guarda
+  (crontab -l 2>/dev/null; echo '*/5 * * * * curl -fsS "https://www.duckdns.org/update?domains=tunombre&token=$(cat ~/.duckdns/token)" >/dev/null') | crontab -
+  ```
+- **Con un proveedor DNS que puede hacer de proxy** (la nube naranja de Cloudflare), deja el registro comodín en
+  **solo DNS**: un registro con proxy responde con las direcciones del proxy en vez de la de tu servidor, así que
+  las comprobaciones de esta guía probarían el proxy, y su propia configuración HTTPS puede chocar con los
+  certificados de Coolify.
 
 Espera a que se propague (de minutos a un par de horas) y compruébalo:
 ```bash
@@ -75,7 +90,8 @@ Debe imprimir la IP **pública** del servidor.
 
 Hazlo antes de instalar Coolify, en una sesión ssh en el servidor.
 
-**SSH solo con clave.** Primero, desde tu ordenador, copia tu clave y comprueba que entras sin contraseña:
+**SSH solo con clave.** Primero, desde tu ordenador, copia tu clave y comprueba que entras sin contraseña (¿aún no
+tienes clave? créala con `ssh-keygen -t ed25519` y acepta la ruta por defecto):
 ```bash
 ssh-copy-id usuario@servidor
 ssh usuario@servidor          # no debe pedir la contraseña de la cuenta
@@ -106,7 +122,8 @@ sudo dpkg-reconfigure --priority=low unattended-upgrades
 
 ## 5 · Instala Coolify
 
-Coolify se instala con un único script oficial, que también instala Docker si falta:
+Coolify se instala con un único script oficial, que también instala Docker si falta. Ejecútalo **en el servidor**
+(en tu sesión ssh), no en tu ordenador:
 ```bash
 curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
 ```
@@ -167,7 +184,8 @@ panel debe seguir privado, así que publicamos **solo la ruta de los webhooks** 
    configuración y revisa la línea `rule`.
 2. **Crea la GitHub App.** *Sources → Add → GitHub App*, sigue el enlace a GitHub y deja que cree la app; Coolify
    recibe las credenciales solo. Instálala en tu cuenta eligiendo **solo los repositorios** que vayas a desplegar
-   (puedes añadir más después).
+   (o *All repositories* en una cuenta personal). Si eliges repositorios, cada uno nuevo hay que añadirlo después (GitHub →
+   *Settings → Applications → Installed GitHub Apps → tu app → Configure → Repository access*): el plugin te avisa.
 3. **Apunta los webhooks a la URL pública.** En GitHub: *Settings → Developer settings → GitHub Apps → tu app →
    Webhook URL* = `https://hooks.ejemplo.org/webhooks/source/github/events`. Guarda.
 
@@ -217,7 +235,8 @@ Después prueba la app de ejemplo que viene en este repositorio. Coolify desplie
 así que primero cópiala a su propia carpeta (el plugin le creará un repo privado y te dará el comando para
 subirla):
 ```bash
-cp -r examples/hello-fastapi ~/Projects/hello-fastapi
+d=$(mktemp -d) && git clone --depth 1 https://github.com/xavieraijon/aijon-labs "$d/aijon-labs" \
+  && cp -r "$d/aijon-labs/examples/hello-fastapi" ~/Projects/hello-fastapi && rm -rf "$d"
 ```
 ```
 Despliega ~/Projects/hello-fastapi
