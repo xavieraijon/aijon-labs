@@ -1,6 +1,7 @@
 """PostgreSQL backups: schedule, backup now, restore, download, status (coolify.py). Offline: api and ssh mocked."""
 
 import argparse
+import io
 import subprocess
 
 import coolify
@@ -380,19 +381,22 @@ def test_failed_import_puts_the_previous_data_back(shell, fake):
     fake.import_states = [{"status": "error", "exit_code": 1, "output": (
         "pg_restore: error: could not execute query: ERROR: cannot drop table users because other objects depend on it\n"
         "DETAIL: constraint orders_user_fk on table orders depends on table users\n"
+        "CONTEXT: COPY users, line 3: \"x@example.org\"\n"
         "Command was: DROP TABLE public.users;")}]
     r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
-    assert not r["ok"] and r["recovered"] and "put back" in r["error"]
-    assert len(r["output"]) == 1 and "DETAIL" not in r["output"][0]
+    assert not r["ok"] and r["recovered"] is True and "put back" in r["error"]
+    assert len(r["output"]) == 1 and "DETAIL" not in r["output"][0] and "example.org" not in str(r)
     assert shell.runs == ["state", "pg_dump", "reset", "reset", "pg_restore", "rm"]
 
 
-def test_import_refused_at_the_post_is_recovered_too(shell, fake, monkeypatch):
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
+def test_import_refused_at_the_post_is_recovered_too(shell, fake, monkeypatch, status):
+    assert coolify.IMPORT_REFUSED == {400, 401, 403, 404, 413, 422}
     real = fake.__call__
 
     def api(method, path, body=None, query=None):
         if method == "POST" and path.endswith("/imports"):
-            raise coolify.Error("HTTP 422 on POST (Coolify rejected the data): The backup exceeds the 10 GiB limit.")
+            raise coolify.Error(f"HTTP {status} on POST (Coolify rejected the data): The backup exceeds the limit.", status)
         return real(method, path, body, query)
     monkeypatch.setattr(coolify, "api", api)
     r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
@@ -504,7 +508,8 @@ def test_inside_git_with_real_git_and_without_git(tmp_path, monkeypatch):
     def no_git(*_a, **_k):
         raise FileNotFoundError("git")
     monkeypatch.setattr(coolify.subprocess, "run", no_git)
-    assert not coolify._inside_git(repo)
+    assert coolify._inside_git(repo / "sub")  # a «.git» above is enough, with or without git
+    assert not coolify._inside_git(tmp_path / "elsewhere")  # no git and no «.git»: not a repository
 
 
 def test_download_needs_ssh_in_the_configuration(fake):
@@ -625,9 +630,9 @@ def test_decommission_without_backup_api_goes_on(config, monkeypatch):
     def api(method, path, body=None, query=None):
         calls.append((method, path))
         if path == f"/databases/{DB}/backups":
-            raise coolify.Error("HTTP 404 on GET")
+            raise coolify.Error("HTTP 404 on GET", 404)
         if method == "GET":
-            raise coolify.Error("HTTP 404 on GET")
+            raise coolify.Error("HTTP 404 on GET", 404)
         return {}
     monkeypatch.setattr(coolify, "api", api)
     monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
@@ -668,3 +673,212 @@ def test_verify_with_empty_routes_probes_the_home_page(monkeypatch, capsys):
     verify.main()
     out = json.loads(capsys.readouterr().out)
     assert out["routes"] == {"/": 200} and out["ok"]
+
+
+# ---------------------------------------------------------------- 0.3.1: unknown states, exact status codes
+
+
+@pytest.mark.parametrize("exc", [TimeoutError("timed out"), ConnectionResetError("reset"),
+                                 coolify.http.client.RemoteDisconnected("closed")])
+def test_api_turns_a_dropped_connection_into_an_error_not_a_traceback(config, monkeypatch, exc):
+    def boom(*_a, **_k):
+        raise exc
+    monkeypatch.setattr(coolify, "token", lambda: "t")
+    monkeypatch.setattr(coolify.urllib.request, "urlopen", boom)
+    with pytest.raises(coolify.Error, match="Lost the connection") as e:
+        coolify.api("POST", f"/databases/{DB}/imports", {})
+    assert e.value.status is None
+
+
+@pytest.mark.parametrize("error", [coolify.Error("HTTP 502 on POST", 502), coolify.Error("HTTP 409 on POST", 409),
+                                   coolify.Error("Lost the connection to Coolify during POST")])
+def test_unclear_answer_to_the_import_post_never_recovers(shell, fake, monkeypatch, error):
+    real = fake.__call__
+
+    def api(method, path, body=None, query=None):
+        if method == "POST" and path.endswith("/imports"):
+            raise error
+        return real(method, path, body, query)
+    monkeypatch.setattr(coolify, "api", api)
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and r["state_unknown"] and "recovered" not in r
+    assert r["copy_in_container"] == coolify.CONTAINER_COPY and r["safety_backup"] == "new"
+    assert coolify.CONTAINER_COPY in r["error"] and "safety backup new" in r["error"]
+    assert "Coolify (Import)" not in r["error"] and "Do not restore again yet" in r["error"]
+    assert shell.runs == ["state", "pg_dump", "reset"]  # no second reset, no pg_restore, copy kept
+
+
+@pytest.mark.parametrize("code", [255, -9])
+def test_ssh_lost_during_the_reset_keeps_the_copy(shell, fake, code):
+    shell.reset_results = [(code, "ssh failed: TimeoutExpired")]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and r["state_unknown"] and fake.imports == []
+    assert coolify.CONTAINER_COPY in r["error"] and "safety backup new" in r["error"]
+    assert shell.runs == ["state", "pg_dump", "reset"]  # the copy is not removed
+
+
+def test_busy_only_for_the_lock_timeout_of_the_reset(shell, fake):
+    shell.reset_results = [(3, "ERROR:  invalid value for parameter lock timeout\n")]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and "busy" not in r["error"] and "could not empty" in r["error"]
+
+
+def test_failed_import_on_an_empty_database_claims_no_recovery(shell, fake):
+    shell.state = "170004|shop|0\n"
+    fake.import_states = [{"status": "error", "exit_code": 1, "output": "ERROR: boom"}]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and r["recovered"] is None and "empty before the restore" in r["error"]
+    assert shell.runs == ["state", "reset"]
+
+
+def test_restore_timeout_message_names_the_safety_backup_step(shell, fake):
+    fake.import_states = [{"status": "in_progress"}]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True, timeout=0))
+    assert "restore the safety backup" in r["error"]
+
+
+def test_schedule_never_changes_the_manual_configuration(fake):
+    fake.configs = [dict(MANUAL, executions=[])]
+    with pytest.raises(coolify.Error, match="not changed"):
+        coolify.cmd_backup_schedule(ns(keep=1, backup="man1"))
+    assert fake.writes() == []
+
+
+def test_yearly_is_a_documented_frequency(fake):
+    assert coolify.valid_frequency("yearly")
+    with pytest.raises(coolify.Error, match="yearly"):
+        coolify.cmd_backup_schedule(ns(frequency="sometimes"))
+
+
+def test_403_hint_names_the_deploy_permission(config, monkeypatch):
+    def forbidden(request, timeout=60):
+        raise coolify.urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"{}"))
+    monkeypatch.setattr(coolify, "token", lambda: "t")
+    monkeypatch.setattr(coolify.urllib.request, "urlopen", forbidden)
+    with pytest.raises(coolify.Error, match="deploy") as e:
+        coolify.api("PATCH", f"/databases/{DB}/backups/b1", {"backup_now": True})
+    assert e.value.status == 403
+
+
+def test_backup_now_ignores_an_execution_of_the_scheduled_configuration(fake, monkeypatch):
+    fake.configs = [dict(SCHED, executions=[ex("s1", day=1)]), dict(MANUAL, executions=[])]
+
+    def scheduled_run_meanwhile(cfg):  # Coolify's scheduler fires during the poll: not ours
+        fake.configs[0]["executions"].insert(0, ex("cron", day=21))
+        cfg["executions"].insert(0, ex("mine", day=20))
+    fake.on_backup_now = scheduled_run_meanwhile
+    r = coolify.cmd_backup_now(ns())
+    assert r["execution_uuid"] == "mine" and r["status"] == "success"
+
+
+def decommission_api(calls, backups_answer):
+    def api(method, path, body=None, query=None):
+        calls.append((method, path))
+        if path == f"/databases/{DB}/backups":
+            if isinstance(backups_answer, Exception):
+                raise backups_answer
+            return backups_answer
+        if method == "GET":
+            raise coolify.Error("HTTP 404 on GET", 404)  # app and database are gone as soon as they are deleted
+        return {}
+    return api
+
+
+def test_decommission_deletes_every_configuration_before_app_and_database(config, monkeypatch):
+    coolify.save_to_registry("shop", {"app_uuid": APP, "db_uuid": DB})
+    calls = []
+    monkeypatch.setattr(coolify, "api", decommission_api(calls, [{"uuid": "b1"}, {"uuid": "b2"}]))
+    monkeypatch.setattr(coolify.time, "sleep", lambda s: None)
+    r = coolify.cmd_decommission(argparse.Namespace(app="shop", confirmed=True, with_db=True, with_project=False))
+    assert r["deleted"]["backups"] == ["b1", "b2"]
+    deletes = [path for method, path in calls if method == "DELETE"]
+    assert deletes[:2] == [f"/databases/{DB}/backups/b1", f"/databases/{DB}/backups/b2"]
+    assert deletes.index(f"/applications/{APP}") > 1 and deletes.index(f"/databases/{DB}") > 1
+
+
+def test_decommission_stops_on_an_error_that_only_mentions_404(config, monkeypatch):
+    coolify.save_to_registry("shop", {"app_uuid": APP, "db_uuid": DB})
+    calls = []
+    error = coolify.Error("HTTP 500 on GET /databases/x404y/backups (error): upstream said 404", 500)
+    monkeypatch.setattr(coolify, "api", decommission_api(calls, error))
+    with pytest.raises(coolify.Error, match="HTTP 500"):
+        coolify.cmd_decommission(argparse.Namespace(app="shop", confirmed=True, with_db=True, with_project=False))
+    assert not [c for c in calls if c[0] == "DELETE"]
+
+
+@pytest.mark.parametrize("lost_at", ["second reset", "pg_restore"])
+def test_ssh_lost_while_putting_the_data_back_is_an_unknown_state(shell, fake, lost_at):
+    fake.import_states = [{"status": "error", "exit_code": 1, "output": "ERROR: boom"}]
+    if lost_at == "second reset":
+        shell.reset_results = [(0, ""), (255, "")]
+    else:
+        shell.restore_code = 255
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and r["state_unknown"] and "recovered" not in r
+    assert r["copy_in_container"] == coolify.CONTAINER_COPY and "safety backup new" in r["error"]
+    assert "rm" not in shell.runs
+
+
+@pytest.mark.parametrize("answer", [{"status": "queued"}, ["queued"], {"text": "\ufffd"}])
+def test_import_accepted_without_an_id_is_an_unknown_state(shell, fake, monkeypatch, answer):
+    real = fake.__call__
+
+    def api(method, path, body=None, query=None):
+        if method == "POST" and path.endswith("/imports"):
+            return answer
+        return real(method, path, body, query)
+    monkeypatch.setattr(coolify, "api", api)
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert not r["ok"] and r["state_unknown"] and "import_id" not in r and "recovered" not in r
+    assert "Coolify (Import)" not in r["error"]
+    assert shell.runs == ["state", "pg_dump", "reset"]
+
+
+def test_unknown_state_on_an_empty_database_names_no_copies(shell, fake):
+    shell.state = "170004|shop|0\n"
+    shell.reset_results = [(255, "")]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True))
+    assert r["state_unknown"] and r["copy_in_container"] is None and r["safety_backup"] is None
+    assert coolify.CONTAINER_COPY not in r["error"]
+
+
+def test_403_outside_backups_does_not_blame_the_deploy_permission(config, monkeypatch):
+    def forbidden(request, timeout=60):
+        raise coolify.urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, io.BytesIO(b"{}"))
+    monkeypatch.setattr(coolify, "token", lambda: "t")
+    monkeypatch.setattr(coolify.urllib.request, "urlopen", forbidden)
+    for method, path in (("DELETE", f"/applications/{APP}"), ("GET", f"/databases/{DB}/backups"),
+                         ("DELETE", f"/databases/{DB}/backups/b1")):
+        with pytest.raises(coolify.Error) as e:
+            coolify.api(method, path)
+        assert "deploy" not in str(e.value) and "permission" in str(e.value)
+
+
+def test_http_error_whose_body_cannot_be_read_keeps_its_status(config, monkeypatch):
+    class Cut(io.BytesIO):
+        def read(self, *_a):
+            raise TimeoutError("timed out")
+
+    def failing(request, timeout=60):
+        raise coolify.urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, Cut())
+    monkeypatch.setattr(coolify, "token", lambda: "t")
+    monkeypatch.setattr(coolify.urllib.request, "urlopen", failing)
+    with pytest.raises(coolify.Error, match="HTTP 502") as e:
+        coolify.api("POST", f"/databases/{DB}/imports", {})
+    assert e.value.status == 502
+
+
+def test_lowering_keep_without_deleting_anything_does_not_ask(fake):
+    fake.configs = [{**SCHED, "executions": [ex(f"s{i}", day=i + 1) for i in range(3)]}]
+    r = coolify.cmd_backup_schedule(ns(keep=5))
+    assert r["ok"] and "needs_confirmation" not in r and r["keep"] == 5
+    assert fake.writes()[0][2] == {"database_backup_retention_amount_locally": 5}
+
+
+def test_still_running_messages_fit_what_there_is_to_put_back(shell, fake):
+    fake.import_states = [{"status": "in_progress"}]
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True, timeout=0))
+    assert "backup-restore --execution new" in r["error"]
+    shell.state = "170004|shop|0\n"
+    r = coolify.cmd_backup_restore(ns(execution="s1", confirmed=True, timeout=0))
+    assert r["safety_backup"] is None and "nothing to put back" in r["error"] and "--execution" not in r["error"]

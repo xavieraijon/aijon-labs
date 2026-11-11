@@ -138,7 +138,7 @@ def test_decommission_waits_before_deleting_the_project(config, monkeypatch):
         calls.append((method, path))
         if method == "GET":
             if remaining[path] == 0:
-                raise coolify.Error("HTTP 404 on GET")
+                raise coolify.Error("HTTP 404 on GET", 404)
             remaining[path] -= 1
         return {}
 
@@ -317,7 +317,7 @@ def _fake_delete_api(calls):
     def fake(method, path, body=None, query=None):
         calls.append((method, path))
         if method == "GET":
-            raise coolify.Error("HTTP 404 on GET")
+            raise coolify.Error("HTTP 404 on GET", 404)
         return {}
     return fake
 

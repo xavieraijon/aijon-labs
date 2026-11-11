@@ -1,6 +1,6 @@
 {
   "name": "coolify-ops",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Provision a self-hosted Coolify server and deploy your projects to it through its API: Dockerfile from templates, local build check, HTTPS domain, PostgreSQL and auto-deploy on every push.",
   "author": { "name": "Xavi Aijon", "url": "https://github.com/xavieraijon" },
   "homepage": "https://github.com/xavieraijon/aijon-labs/tree/main/plugins/coolify-ops",

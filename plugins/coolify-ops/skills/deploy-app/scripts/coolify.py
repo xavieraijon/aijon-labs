@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
 import json
 import os
 import re
@@ -57,7 +58,11 @@ LEGACY_REGISTRY_KEYS = {"proyecto_uuid": "project_uuid", "dominio": "domain", "r
 
 
 class Error(Exception):
-    """Expected error: printed as JSON with ok=false."""
+    """Expected error: printed as JSON with ok=false. «status» is the HTTP status when Coolify answered with one."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def emit(data: dict, code: int = 0) -> None:
@@ -158,19 +163,29 @@ def api(method: str, path: str, body: dict | list | None = None, query: dict | N
     })
     try:
         with urllib.request.urlopen(request, timeout=60) as r:
-            text = r.read().decode() or "{}"
+            text = r.read().decode(errors="replace") or "{}"
             try:
                 return json.loads(text)
             except json.JSONDecodeError:
                 return {"text": text}
     except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:800]
+        try:
+            detail = e.read().decode(errors="replace")[:800]
+        except (OSError, http.client.HTTPException):  # the answer was cut short: the status is what matters
+            detail = ""
         hints = {401: "invalid or expired token", 403: "token lacks a permission or your IP is not in «Allowed IPs»",
                  404: "not found (uuid or path)", 422: "Coolify rejected the data"}
-        raise Error(f"HTTP {e.code} on {method} {path} ({hints.get(e.code, 'error')}): {mask(detail)}") from None
+        if e.code == 403 and method in ("POST", "PATCH") and re.search(r"/(backups|imports)(/|$)", path):
+            hints[403] = ("token lacks a permission — running a backup or a restore needs «deploy» — or your IP is "
+                          "not in «Allowed IPs»")
+        raise Error(f"HTTP {e.code} on {method} {path} ({hints.get(e.code, 'error')}): {mask(detail)}",
+                    status=e.code) from None
     except urllib.error.URLError as e:
         raise Error(f"Cannot reach Coolify at {cfg['url']}: {e.reason}. "
                     "Are you on the right network/VPN? Is API access enabled?") from None
+    except (OSError, http.client.HTTPException) as e:  # timeout or connection dropped while reading the answer
+        raise Error(f"Lost the connection to Coolify during {method} {path} ({type(e).__name__}): the request may "
+                    "or may not have been processed") from None
 
 
 # ---------------------------------------------------------------- local registry of apps
@@ -706,7 +721,7 @@ def _wait_until_gone(path: str, timeout: int = 180) -> bool:
         try:
             api("GET", path)
         except Error as e:
-            if "HTTP 404" in str(e):
+            if e.status == 404:
                 return True
             raise
         time.sleep(3)
@@ -781,7 +796,7 @@ def cmd_decommission(a):
         try:
             configs = _configs(dbu)
         except Error as e:
-            if "404" not in str(e):  # no backup API (Coolify before 4.6): nothing to delete
+            if e.status != 404:  # 404 = no backup API (Coolify before 4.6): nothing to delete
                 raise
             configs = []
         for cfg in configs:
@@ -851,6 +866,7 @@ FREQUENCY_KEYWORDS = {"hourly", "daily", "weekly", "monthly", "yearly"}
 CRON_FIELD = re.compile(r"[0-9*/,-]+")
 DB_UUID = re.compile(r"[a-z0-9]{10,40}")
 IMPORT_FINAL = {"finished", "error", "killed", "cancelled", "closed"}
+IMPORT_REFUSED = {400, 401, 403, 404, 413, 422}  # answers to the import POST that mean «not started»
 POLL_SECONDS = 5
 # Failure output may quote rows of the database (CONTEXT/DETAIL lines, «Command was»): keep only error lines
 ERROR_LINE = re.compile(r"^\s*(ERROR:|FATAL:|pg_restore: error:|pg_dump: error:|Blocked PostgreSQL restore|"
@@ -961,7 +977,7 @@ def cmd_backup_status(a):
 
 def cmd_backup_schedule(a):
     if a.frequency and not valid_frequency(a.frequency):
-        raise Error(f"Invalid frequency {a.frequency!r}: use hourly, daily, weekly, monthly or a 5-field cron")
+        raise Error(f"Invalid frequency {a.frequency!r}: use hourly, daily, weekly, monthly, yearly or a 5-field cron")
     if a.keep is not None and a.keep < 1:
         raise Error("--keep must be 1 or more (the skill never keeps every backup forever: the disk would fill up)")
     db, _info = _backup_target(a)
@@ -970,6 +986,9 @@ def cmd_backup_schedule(a):
         cfg = next((c for c in cfgs if c.get("uuid") == a.backup), None)
         if not cfg:
             raise Error(f"No backup configuration {a.backup!r} on this database")
+        if _origin(cfg) == "manual":
+            raise Error("That is the skill's own configuration for on-demand backups (no schedule, keeps "
+                        f"{MANUAL_KEEP}): it is not changed")
     else:
         cfg = next((c for c in cfgs if _origin(c) == "scheduled"), None)
         others = [c.get("uuid") for c in cfgs if _origin(c) == "other"]
@@ -1103,22 +1122,31 @@ def _ssh_db(target: str, db: str, command: str, stdin: str = "", timeout: int = 
     return r.returncode, r.stdout, r.stderr
 
 
-def _reset(target: str, db: str) -> tuple[bool, str]:
+def _ssh_lost(code: int) -> bool:
+    """ssh itself failed, timed out or was killed: what it was running may or may not have finished."""
+    return code == 255 or code < 0
+
+
+def _reset(target: str, db: str) -> tuple[bool | None, str]:
+    """True = emptied; False = failed and nothing changed (one transaction); None = ssh died, state unknown."""
     code, _out, err = _ssh_db(target, db, PSQL, RESET_SQL)
     if code == 0:
         return True, ""
-    if "lock timeout" in err:
+    if _ssh_lost(code):  # the transaction may or may not have been committed
+        return None, "lost the ssh connection while emptying the database"
+    if "canceling statement due to lock timeout" in err:
         return False, "the database is busy (a lock held for more than 30 s): nothing changed, try again"
     return False, "could not empty the database: " + (" | ".join(error_lines(err)) or f"exit {code}")
 
 
-def _recover(target: str, db: str) -> bool:
-    """Put back the copy taken inside the container before the reset; keep the file if it fails."""
+def _recover(target: str, db: str) -> bool | None:
+    """Put back the copy taken inside the container before the reset. True = done (copy removed); False = failed;
+    None = ssh was lost meanwhile, state unknown. The copy is kept unless it was put back."""
     ok, _msg = _reset(target, db)
     if ok:
         code, _o, _e = _ssh_db(target, db, 'pg_restore --exit-on-error --single-transaction --no-owner --no-acl '
                                f'-U "$POSTGRES_USER" -d "$POSTGRES_DB" {CONTAINER_COPY}', timeout=1800)
-        ok = code == 0
+        ok = None if _ssh_lost(code) else code == 0
     if ok:
         _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
     return ok
@@ -1174,6 +1202,12 @@ def cmd_backup_restore(a):
             return {**base, "ok": False, "error": "could not copy the current data inside the container: nothing "
                     "was changed. " + " | ".join(error_lines(err))}
     ok, msg = _reset(target, db)
+    copies = (f". The data from before is in {CONTAINER_COPY} inside the database container and in the safety "
+              f"backup {safety} (backup-restore --execution {safety})") if has_data else ""
+    unknown = {**base, "ok": False, "state_unknown": True, "copy_in_container": CONTAINER_COPY if has_data else None}
+    if ok is None:  # the copies are the only sure thing left: keep them and say where they are
+        return {**unknown, "error": f"{msg}: it may be empty or as before. Do not restore again yet: look at the "
+                                    f"data in the app first{copies}"}
     if not ok:
         if has_data:
             _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
@@ -1181,9 +1215,16 @@ def cmd_backup_restore(a):
     try:
         r = api("POST", f"/databases/{db}/imports",
                 {"source": "server", "path": again.get("filename"), "replace_existing": True}) or {}
-    except Error as e:  # refused at the POST (size, validation…): nothing is running, the database is empty now
+    except Error as e:
         r = None
-        result = {"ok": False, "finished": True, "error": f"Coolify refused the import: {e}"}
+        if e.status in IMPORT_REFUSED:  # a definite «no» (size, validation, permission): nothing is running
+            result = {"ok": False, "finished": True, "error": f"Coolify refused the import: {e}"}
+        else:  # 5xx, 409 or no answer at all: Coolify may be running an import, recovering now would race it
+            return {**unknown, "error": f"No clear answer from Coolify when starting the restore ({e}): it may be "
+                                        f"running. Do not restore again yet: wait, then look at the data in the app{copies}"}
+    if r is not None and not (isinstance(r, dict) and r.get("id")):  # accepted, but nothing to follow it with
+        return {**unknown, "error": "Coolify accepted the restore but gave no id to follow it: it may be running. "
+                                    f"Do not restore again yet: wait, then look at the data in the app{copies}"}
     if r is not None:
         try:
             result = _import_result(db, r.get("id"), a.timeout)
@@ -1196,15 +1237,26 @@ def cmd_backup_restore(a):
             _ssh_db(target, db, f"rm -f {CONTAINER_COPY}")
         return {**result, **base}
     if not result.get("finished"):  # still running on the server: recovering now would race it
-        return {**result, **base, "copy_in_container": CONTAINER_COPY if has_data else None}
-    recovered = _recover(target, db) if has_data else True
+        advice = (f"; if it ends in failure, restore the safety backup (backup-restore --execution {safety})"
+                  if has_data else "; the database was empty before the restore: if it fails there is nothing to put back")
+        return {**result, **base, "copy_in_container": CONTAINER_COPY if has_data else None,
+                "error": result.get("error", "the restore is still running") + advice}
+    failure = result.get("error", "the restore failed")
+    if not has_data:  # nothing to put back: «recovered» is null, not true
+        return {**result, **base, "ok": False, "recovered": None,
+                "error": f"{failure}; the database was empty before the restore and is empty now"}
+    recovered = _recover(target, db)
+    if recovered is None:
+        return {**result, **unknown, "error": f"{failure}, and the ssh connection was lost while putting the previous "
+                                              "data back: the database may be empty, as before, or still being "
+                                              f"restored. Do not restore again yet: wait, then look at the data in the app{copies}"}
     out = {**result, **base, "ok": False, "recovered": recovered}
-    if has_data and recovered:
-        out["error"] = f"{result.get('error', 'the restore failed')}; the data from before the restore was put back"
-    elif has_data:
-        out["error"] = (f"{result.get('error', 'the restore failed')} and putting the previous data back failed too: "
-                        f"the database may be empty. Copies: {CONTAINER_COPY} inside the database container, and "
-                        f"the safety backup {safety} (backup-restore --execution {safety})")
+    if recovered:
+        out["error"] = f"{failure}; the data from before the restore was put back"
+    else:
+        out["error"] = (f"{failure} and putting the previous data back failed too: the database may be empty. "
+                        f"Copies: {CONTAINER_COPY} inside the database container, and the safety backup {safety} "
+                        f"(backup-restore --execution {safety})")
     return out
 
 
@@ -1221,6 +1273,8 @@ def _inside_git(path: Path) -> bool:
     p = path
     while not p.exists() and p != p.parent:
         p = p.parent
+    if any((d / ".git").exists() for d in (p, *p.parents)):  # also when git gives no clear answer (see below)
+        return True
     try:
         r = subprocess.run(["git", "-C", str(p), "rev-parse", "--is-inside-work-tree"],
                            capture_output=True, text=True, timeout=20)
@@ -1390,8 +1444,8 @@ def parser() -> argparse.ArgumentParser:
 
     backup_parser("backup-status", "PostgreSQL backups: schedules and the latest backups (read-only)"
                   ).set_defaults(f=cmd_backup_status)
-    c = backup_parser("backup-schedule", "create or change the scheduled backups (lowering --keep needs --confirmed)")
-    c.add_argument("--frequency", help="hourly, daily, weekly, monthly or a 5-field cron (default daily)")
+    c = backup_parser("backup-schedule", "create or change the scheduled backups (a --keep that deletes backups needs --confirmed)")
+    c.add_argument("--frequency", help="hourly, daily, weekly, monthly, yearly or a 5-field cron (default daily)")
     c.add_argument("--keep", type=int, help=f"backups kept on the server (default {DEFAULT_KEEP}, minimum 1)")
     c.add_argument("--off", action="store_true", help="stop the scheduled backups (existing ones stay)")
     c.add_argument("--backup", help="uuid of a backup configuration made in Coolify to change instead")

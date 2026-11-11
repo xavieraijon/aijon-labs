@@ -6,6 +6,35 @@ All notable changes to the plugins of this marketplace. The format is based on
 
 ## coolify-ops
 
+### 0.3.1 — 2026-11-11
+
+#### Fixed
+- A connection dropped or timed out while Coolify was answering ended in a Python traceback instead of a JSON
+  error, in every command. It is now reported as «Lost the connection to Coolify».
+- `backup-restore` put the previous data back after **any** error when starting the import, also a 5xx, a 409 or
+  a lost connection, where Coolify may already be importing. It now recovers only after a definite refusal; any
+  other answer is reported as `state_unknown: true`, nothing more is touched and both copies are named.
+- `backup-restore`: an ssh connection lost while the database was being emptied was reported as «could not
+  empty» and the copy inside the database container was removed; lost while the previous data was being put
+  back, it was reported as a failed recovery. The copy is now kept and the answer is `state_unknown: true`.
+- `decommission --with-db` took any error whose text contained «404» (the database uuid, the response body) for
+  «no backup API» and went on, leaving the backup files on the server. Only a real HTTP 404 counts now.
+- `backup-restore`: a failed import on a database that was already empty answered `recovered: true`. It now
+  answers `recovered: null` and says the database was and is empty.
+- `backup-restore` reported «busy» for any error mentioning «lock timeout», not only the lock timeout of the
+  reset.
+- `backup-download` could write a dump inside a git repository when `git` gave no clear answer (timeout, unsafe
+  ownership). A `.git` in the folder or above it is now enough to refuse.
+- `backup-schedule --backup <uuid>` accepted the skill's own on-demand configuration and could change how many
+  backups it keeps. It is now refused.
+
+#### Changed
+- A 403 on a backup or a restore says that they need the `deploy` permission.
+- `yearly` appears in the help and the error message of `backup-schedule` (it was already accepted).
+- The message of a restore that is still running after the timeout also says what to do if it ends in failure.
+- `deploy-app` reads a failed restore in a fixed order (unknown state, recovered or not, still running) and says
+  what to do in each case.
+
 ### 0.3.0 — 2026-11-10
 
 #### Added
