@@ -976,6 +976,8 @@ def cmd_backup_status(a):
 
 
 def cmd_backup_schedule(a):
+    if a.on and a.off:
+        raise Error("--on and --off cannot go together")
     if a.frequency and not valid_frequency(a.frequency):
         raise Error(f"Invalid frequency {a.frequency!r}: use hourly, daily, weekly, monthly, yearly or a 5-field cron")
     if a.keep is not None and a.keep < 1:
@@ -1011,16 +1013,22 @@ def cmd_backup_schedule(a):
                     "error": f"Keeping {a.keep} deletes the {would_delete} oldest backup(s) at the next run: "
                              "ask the user, then repeat with --confirmed"}
         changes["database_backup_retention_amount_locally"] = a.keep
+    # A stopped schedule starts again only when asked: with --on, or with a bare call on the skill's own
+    # schedule. Changing --frequency or --keep alone leaves it stopped.
+    bare = not (a.frequency or a.keep is not None or a.off)
     if a.off and cfg.get("enabled"):
         changes["enabled"] = False
-    elif not a.off and not cfg.get("enabled") and _origin(cfg) == "scheduled":
+    elif not cfg.get("enabled") and (a.on or (bare and _origin(cfg) == "scheduled")):
         changes["enabled"] = True
     if changes:
         api("PATCH", f"/databases/{db}/backups/{cfg['uuid']}", changes)
     merged = {**cfg, **changes}
-    return {"ok": True, "created": False, "backup_uuid": cfg.get("uuid"), "changed": sorted(changes),
-            "frequency": merged.get("frequency"), "keep": merged.get("database_backup_retention_amount_locally"),
-            "enabled": merged.get("enabled")}
+    result = {"ok": True, "created": False, "backup_uuid": cfg.get("uuid"), "changed": sorted(changes),
+              "frequency": merged.get("frequency"), "keep": merged.get("database_backup_retention_amount_locally"),
+              "enabled": merged.get("enabled")}
+    if not merged.get("enabled") and not a.off:
+        result["message"] = "The schedule stays stopped: add --on to start it again"
+    return result
 
 
 def _backup_now(db: str, info: dict, timeout: int) -> dict:
@@ -1448,6 +1456,8 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("--frequency", help="hourly, daily, weekly, monthly, yearly or a 5-field cron (default daily)")
     c.add_argument("--keep", type=int, help=f"backups kept on the server (default {DEFAULT_KEEP}, minimum 1)")
     c.add_argument("--off", action="store_true", help="stop the scheduled backups (existing ones stay)")
+    c.add_argument("--on", action="store_true",
+                   help="start stopped scheduled backups again (--frequency or --keep alone leave them stopped)")
     c.add_argument("--backup", help="uuid of a backup configuration made in Coolify to change instead")
     c.add_argument("--confirmed", action="store_true"); c.set_defaults(f=cmd_backup_schedule)
     c = backup_parser("backup-now", f"take a backup now (kept apart from the scheduled ones, last {MANUAL_KEEP})")

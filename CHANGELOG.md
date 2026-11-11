@@ -29,6 +29,9 @@ All notable changes to the plugins of this marketplace. The format is based on
   backups it keeps. It is now refused.
 
 #### Changed
+- `backup-schedule`: a schedule stopped with `--off` stays stopped when only `--frequency` or `--keep` change
+  (before, any call without `--off` started it again). New `--on` to start it again; a call that changes
+  nothing still does it on the skill's own schedule.
 - A 403 on a backup or a restore says that they need the `deploy` permission.
 - `yearly` appears in the help and the error message of `backup-schedule` (it was already accepted).
 - The message of a restore that is still running after the timeout also says what to do if it ends in failure.

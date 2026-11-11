@@ -79,7 +79,7 @@ def fake(config, monkeypatch):
 
 
 def ns(**kw):
-    base = {"app": "shop", "db": None, "frequency": None, "keep": None, "off": False, "backup": None,
+    base = {"app": "shop", "db": None, "frequency": None, "keep": None, "off": False, "on": False, "backup": None,
             "confirmed": False, "timeout": 60, "backup_timeout": 60, "out": None}
     return argparse.Namespace(**{**base, **kw})
 
@@ -182,6 +182,36 @@ def test_schedule_off(fake):
     fake.configs = [{**SCHED, "executions": []}]
     assert coolify.cmd_backup_schedule(ns(off=True))["enabled"] is False
     assert fake.writes()[0][2] == {"enabled": False}
+
+
+@pytest.mark.parametrize("change", [{"keep": 3}, {"frequency": "weekly"}])
+def test_changing_a_stopped_schedule_keeps_it_stopped(fake, change):
+    fake.configs = [{**SCHED, "enabled": False, "executions": []}]
+    r = coolify.cmd_backup_schedule(ns(**change))
+    assert r["enabled"] is False and "--on" in r["message"]
+    assert "enabled" not in fake.writes()[0][2]
+
+
+@pytest.mark.parametrize("flags", [{}, {"on": True}, {"on": True, "keep": 3}])
+def test_bare_call_or_on_starts_a_stopped_schedule(fake, flags):
+    fake.configs = [{**SCHED, "enabled": False, "executions": []}]
+    r = coolify.cmd_backup_schedule(ns(**flags))
+    assert r["enabled"] is True and "message" not in r
+    assert fake.writes()[0][2]["enabled"] is True
+
+
+def test_bare_call_does_not_start_a_configuration_made_in_coolify(fake):
+    fake.configs = [{"uuid": "ui1", "timeout": 3600, "enabled": False, "frequency": "weekly", "executions": []}]
+    assert coolify.cmd_backup_schedule(ns(backup="ui1"))["enabled"] is False
+    assert fake.writes() == []
+    assert coolify.cmd_backup_schedule(ns(backup="ui1", on=True))["enabled"] is True
+    assert fake.writes() == [("PATCH", f"/databases/{DB}/backups/ui1", {"enabled": True})]
+
+
+def test_on_and_off_together_are_refused_before_any_call(fake):
+    with pytest.raises(coolify.Error, match="cannot go together"):
+        coolify.cmd_backup_schedule(ns(on=True, off=True))
+    assert fake.calls == []
 
 
 # ---------------------------------------------------------------- backup now
