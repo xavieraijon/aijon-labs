@@ -5,12 +5,12 @@
 <h1 align="center">Tradesea CRT</h1>
 
 <p align="center">
-  <strong>Candle Range Theory en tus gráficos de Tradesea, de 1H a 12H y en tiempo real.</strong><br>
+  <strong>Candle Range Theory en tus gráficos de Tradesea, en cualquier temporalidad de 15 minutos a mensual y en tiempo real.</strong><br>
   Un userscript gratuito de <a href="https://github.com/xavieraijon/aijon-labs">AijonLabs</a>.
 </p>
 
 <p align="center">
-  <img alt="versión" src="https://img.shields.io/badge/versión-1.4.0-2962FF">
+  <img alt="versión" src="https://img.shields.io/badge/versión-1.5.0-2962FF">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-MIT-089981">
   <img alt="Tampermonkey" src="https://img.shields.io/badge/Tampermonkey-compatible-00485B">
   <img alt="Violentmonkey" src="https://img.shields.io/badge/Violentmonkey-compatible-1E88E5">
@@ -24,11 +24,12 @@
 
 ---
 
-Tradesea no permite añadir indicadores propios. **Tradesea CRT** añade el que echan de menos muchos traders de CRT: revisa todas las temporalidades de **12H a 1H**, encuentra los setups válidos de Candle Range Theory y dibuja su rango como **Horizontal Rays** directamente en tus gráficos. Los mantiene al día a medida que cierran las velas.
+Tradesea no permite añadir indicadores propios. **Tradesea CRT** añade el que echan de menos muchos traders de CRT: revisa las temporalidades que elijas, de **15 minutos a mensual**, encuentra los setups válidos de Candle Range Theory y dibuja su rango como **Horizontal Rays** directamente en tus gráficos. Los mantiene al día a medida que cierran las velas.
 
 ## Características
 
-- **Multitemporalidad**: 12H, 8H, 6H, 4H, 3H, 2H y 1H, con las velas alineadas a la sesión de CME tal como las pinta Tradesea.
+- **Cualquier temporalidad de 15m a M**: 15m, 30m, 1H, 2H, 3H, 4H, 6H, 8H, 12H, D, W y M. Elige un rango (*desde 15m hasta D*) o márcalas una a una. Las velas se alinean a la sesión de CME tal como las pinta Tradesea.
+- **Modo temporalidad activa**: sigue la temporalidad que tenga el gráfico, incluidas las que no están en la lista, como 5m o 45m.
 - **En tiempo real**: recalcula cada 30 segundos y al instante cuando cambias de símbolo o de temporalidad.
 - **Se limpia solo**: los setups completados o invalidados desaparecen sin que hagas nada.
 - **Visual claro**: un color de línea por temporalidad, etiqueta en verde (alcista) o rojo (bajista) y línea discontinua mientras la C2 sigue abierta.
@@ -70,15 +71,17 @@ Cada setup dibuja dos rayos que empiezan en la vela C1: su **High** y su **Low**
 2H Low (Bearish)       ← color de la línea: temporalidad · continua = C2 cerrada · discontinua = C2 en formación
 ```
 
-| Temporalidad | 12H | 8H | 6H | 4H | 3H | 2H | 1H |
-|---|---|---|---|---|---|---|---|
-| Color de línea | rosa | verde azulado | marrón | naranja | morado | azul | gris |
+| Temporalidad | 15m | 30m | 1H | 2H | 3H | 4H | 6H | 8H | 12H | D | W | M |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Color de línea | cian | verde claro | gris | azul | morado | naranja | marrón | verde azulado | rosa | índigo | pizarra | negro |
+
+Las temporalidades que no están en la lista (solo en modo *activa*, por ejemplo 5m o 45m) se dibujan en gris azulado.
 
 ### Ajustes
 
 | Ajuste | Por defecto | Descripción |
 |---|---|---|
-| Temporalidades | Todas | Analiza las temporalidades que marques, o solo la activa del gráfico |
+| Temporalidades | De 15m a D | Analiza las temporalidades que marques (*Desde … hasta …* marca un rango entero de golpe), o solo la activa del gráfico |
 | Activos (C2 cerrada) | Sí | Setups con la C2 ya cerrada que aún no han llegado a su objetivo |
 | En formación (C2 abierta) | Sí | Setups en los que la vela actual está barriendo C1 (todavía pueden fallar) |
 | Nivel 50 % | No | Añade un rayo punteado en la mitad de C1, el primer objetivo habitual |
@@ -99,7 +102,7 @@ Para cada par de velas consecutivas, **C1** (rango) y **C2**:
    - *(opcional, activado por defecto)* una vela posterior **cierra** fuera de C1 por el lado barrido.
 4. Se ignoran las velas que barren los dos extremos o ninguno.
 
-Las temporalidades altas se construyen a partir de velas de 1H alineadas a la sesión CME Globex (18:00 hora de Nueva York), así que coinciden una a una con las velas de Tradesea.
+Las temporalidades intradía se construyen a partir de velas de 15 minutos o de 1 hora alineadas a la sesión CME Globex (18:00 hora de Nueva York); D y W son las propias velas de sesión de Tradesea, y M se construye a partir de ellas. Coinciden una a una con las velas de Tradesea.
 
 ## Solución de problemas
 
@@ -107,13 +110,14 @@ Las temporalidades altas se construyen a partir de velas de 1H alineadas a la se
 |---|---|
 | No aparece la pastilla | Comprueba que *Permitir scripts de usuario* o el *Modo de desarrollador* estén activados (paso 2) y que el script esté habilitado en el gestor. Recarga la página. |
 | Punto rojo | Pasa el ratón por la pastilla para ver el error. Si Tradesea ha cambiado su plataforma, actualiza el script o [abre una incidencia](https://github.com/xavieraijon/aijon-labs/issues). |
-| Punto ámbar | Estás en modo *activa* con una temporalidad fuera de 1H–12H (por ejemplo 5m o D). Cambia de temporalidad o de modo. |
+| Punto ámbar | Estás en modo *activa* con una temporalidad que el script no puede leer (segundos, o múltiplos como 2D). Cambia de temporalidad o de modo. |
 | Demasiados rayos | Desmarca temporalidades, cambia al modo *activa* o baja la *Antigüedad máx.* |
 | La pastilla no se ve | ⚙ → *Restablecer posición*, o cambia el tamaño de la ventana. |
 
 ## Limitaciones
 
-- Analiza de 1H a 12H, a partir de velas de 1H. No revisa temporalidades inferiores a una hora ni el diario.
+- No admite temporalidades en segundos ni múltiplos de periodo (2D, 3W…). Las inferiores a 15m solo funcionan en modo *activa*.
+- Cada temporalidad mira un histórico limitado (unos 10 días de mercado en 15m/30m, 6 semanas en las horarias y 3 años en D/W/M), más que suficiente para la *Antigüedad máx.* por defecto de 30 velas.
 - Tradesea no ofrece una API pública para complementos. El script usa la interfaz interna del gráfico, así que una actualización de la plataforma puede romperlo hasta que salga una versión nueva.
 - Los rayos son dibujos normales del gráfico. Si guardas tu layout, Tradesea puede conservar una copia; el script limpia y vuelve a dibujar sus propios rayos al cargar.
 

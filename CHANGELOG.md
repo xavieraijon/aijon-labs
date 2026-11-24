@@ -8,6 +8,20 @@ All notable changes to the plugins and userscripts of this repository. The forma
 
 Userscript for Tradesea (installed with Tampermonkey or Violentmonkey, not through Claude Code).
 
+### 1.5.0 — 2026-11-24
+
+#### Added
+- 15m, 30m, D, W and M timeframes, besides 1H to 12H. 15m and 30m are built from 15-minute candles aligned to
+  the CME session; D and W are Tradesea's own trading-session candles and M is built from the daily ones.
+- *From … to …* selector in the settings to tick a whole range of timeframes at once (default: 15m to D).
+- *Active timeframe* mode now follows any chart timeframe in minutes (e.g. 5m, 45m, 90m) and D, W and M.
+
+#### Changed
+- On D, W and M charts, rays start on the right daily candle (a session that opens at 18:00 belongs to the next
+  trading day).
+- The data feed is only asked for the resolutions the selected timeframes need; D and W are refreshed at most
+  once a minute.
+
 ### 1.4.0 — 2026-11-24
 
 First public release.
