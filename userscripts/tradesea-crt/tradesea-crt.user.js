@@ -362,12 +362,13 @@
   }
 
   /* ───────────────────────── Drawing ───────────────────────── */
-  // Where a ray starts. Rays of the chart's own timeframe start exactly on their C1 candle. Rays of
-  // extra timeframes start at the real start of C1; on D/W/M charts they start at the session that
-  // contains it, so they land on the right daily candle.
+  // Where a ray starts: on intraday charts, the real start of C1. On D/W/M (and 2D, 33D…) charts the
+  // chart places drawings by trade date, so the ray goes at midday of C1's trade date (a session that
+  // opens at 18:00 New York belongs to the next day) and lands on the right candle.
   function shapeTime(item, periodChart) {
-    if (item.fromChart || !periodChart) return Math.floor(item.s / 1000);
-    return Math.floor(sessionStartOf(item.s) / 1000);
+    if (!periodChart) return Math.floor(item.s / 1000);
+    const p = nyParts(sessionStartOf(item.s) + 6 * H);
+    return Date.UTC(p.y, p.mo - 1, p.d, 12) / 1000;
   }
 
   function isOurShape(chart, s) {
