@@ -5,12 +5,12 @@
 <h1 align="center">Tradesea CRT</h1>
 
 <p align="center">
-  <strong>Candle Range Theory on your Tradesea charts, on any timeframe from 15 minutes to monthly, updated live.</strong><br>
+  <strong>Candle Range Theory on your Tradesea charts, on whatever timeframe you are looking at (2D, 10H, 33D…), updated live.</strong><br>
   A free userscript by <a href="https://github.com/xavieraijon/aijon-labs">AijonLabs</a>.
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.5.0-2962FF">
+  <img alt="version" src="https://img.shields.io/badge/version-1.6.0-2962FF">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-089981">
   <img alt="Tampermonkey" src="https://img.shields.io/badge/Tampermonkey-supported-00485B">
   <img alt="Violentmonkey" src="https://img.shields.io/badge/Violentmonkey-supported-1E88E5">
@@ -24,17 +24,15 @@
 
 ---
 
-Tradesea does not let you add custom indicators. **Tradesea CRT** adds the one many CRT traders miss: it scans the timeframes you choose, from **15 minutes to monthly**, finds valid Candle Range Theory setups and draws their range as **Horizontal Rays** directly on your charts, keeping them up to date as candles close.
+Tradesea does not let you add custom indicators. **Tradesea CRT** adds the one many CRT traders miss: it reads the candles of each chart, **whatever timeframe it is set to**, finds valid Candle Range Theory setups and draws their range as **Horizontal Rays** directly on the chart, keeping them up to date as candles close. There is nothing to choose: change the timeframe and the ranges change with it.
 
 ## Features
 
-- **Any timeframe from 15m to M**: 15m, 30m, 1H, 2H, 3H, 4H, 6H, 8H, 12H, D, W and M. Pick a range (*from 15m to D*) or tick them one by one. Candles are aligned to the CME session exactly as Tradesea draws them.
-- **Active timeframe mode**: follows whatever timeframe the chart is on, including ones outside the list such as 5m or 45m.
-- **Live**: recalculates every 30 seconds and instantly when you change symbol or timeframe.
+- **Always the chart's timeframe**: 15m, 4H, 10H, D, 2D, 33D, 2W, 3M, even seconds. Nothing to select: switch timeframe and the setups follow. In a split layout each chart uses its own timeframe and symbol.
+- **Extra timeframes, if you want them**: add the ranges of 15m to M on top of the chart's own (for example 4H and D ranges while you look at 15m), with a *From … to …* selector. None by default.
+- **Live**: recalculates every 15 seconds and instantly when you change symbol or timeframe.
 - **Self-cleaning**: completed and invalidated setups disappear on their own.
 - **Clear visuals**: one line colour per timeframe; label in green (bullish) or red (bearish); dashed while C2 is still open.
-- **Two modes**: all selected timeframes, or only the chart's active timeframe.
-- **Works on split layouts**: each chart gets the setups for its own symbol.
 - **Lightweight UI**: a small draggable badge with a settings panel, in English or Spanish depending on your browser.
 - **Private**: no external requests, no tracking, no orders. Everything runs inside your browser.
 
@@ -79,8 +77,8 @@ Taken from Chromium's own translations, which Chrome, Brave and Vivaldi use as t
 
 | Element | What it does |
 |---|---|
-| ● dot | Green = running · Amber = unsupported timeframe in *active* mode · Red = error (hover for details) · Grey = off |
-| `CRT (all) · 4 · 09:15` | Mode, number of setups drawn, time of last update |
+| ● dot | Green = running · Red = error (hover for details) · Grey = off |
+| `CRT (2D +2) · 4 · 09:15` | The charts' timeframes (+ number of extra timeframes), setups drawn, time of last update |
 | ↻ | Recalculate now (also restores rays you deleted by mistake) |
 | ⚙ | Open settings |
 | `off` / `on` | Turn the script off (removes its rays) or back on |
@@ -100,13 +98,14 @@ Each setup draws two rays starting at the C1 candle: its **High** and its **Low*
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Line colour | cyan | light green | grey | blue | purple | orange | brown | teal | pink | indigo | slate | black |
 
-Timeframes outside the list (only in *active* mode, e.g. 5m or 45m) are drawn in blue-grey.
+The chart's own timeframe uses the colour of the list when it is in it, and indigo-blue otherwise (2D, 10H, 33D…).
 
 ### Settings
 
 | Setting | Default | Description |
 |---|---|---|
-| Timeframes | 15m to D | Scan the timeframes you tick (*From … to …* ticks a whole range at once), or only the chart's active one |
+| Chart's timeframe | Always | The setups of each chart's own timeframe are always drawn, whatever it is |
+| Extra timeframes | None | Ranges of other timeframes (15m to M) drawn on top; *From … to …* ticks a whole range at once, *None* clears them |
 | Active (C2 closed) | On | Setups whose C2 has closed and whose target has not been reached |
 | Forming (C2 still open) | On | Setups where the current candle is sweeping C1 (may still fail) |
 | 50% level | Off | Adds a dotted ray at the middle of C1, the usual first target |
@@ -127,7 +126,7 @@ For every pair of consecutive candles, **C1** (range) and **C2**:
    - *(optional, on by default)* a later candle **closes** outside C1 on the swept side.
 4. Candles that sweep both extremes, or neither, are ignored.
 
-Intraday timeframes are built from 15-minute or 1-hour candles and aligned to the CME Globex session (18:00 New York); D and W are Tradesea's own trading-session candles, and M is built from them. They match Tradesea's candles one to one.
+The chart's timeframe uses the very candles the chart draws, so they always match. Extra timeframes are built from the data feed: intraday ones from 15-minute or 1-hour candles aligned to the CME Globex session (18:00 New York), D and W from Tradesea's own trading-session candles, and M from the daily ones.
 
 ## Troubleshooting
 
@@ -135,14 +134,13 @@ Intraday timeframes are built from 15-minute or 1-hour candles and aligned to th
 |---|---|
 | No badge appears | Check that the user scripts switch (or *Developer mode* before version 138) is on, with the [name for your language](#name-of-the-switch-in-each-language) (step 2), and that the script is enabled in the manager. Reload the page. |
 | Red dot | Hover over the badge to read the error. If Tradesea changed its platform, update the script or [open an issue](https://github.com/xavieraijon/aijon-labs/issues). |
-| Amber dot | You are in *active* mode on a timeframe the script cannot read (seconds, or multiples such as 2D). Switch timeframe or mode. |
-| Too many rays | Untick timeframes, switch to *active* mode or lower *Max. age*. |
+| Too many rays | Remove the extra timeframes (⚙ → *None*) or lower *Max. age*. |
 | Badge is off-screen | ⚙ → *Reset position*, or resize the window. |
 
 ## Limitations
 
-- Seconds and multi-period timeframes (2D, 3W…) are not supported. Timeframes under 15m only work in *active* mode.
-- Each timeframe looks back a limited history (about 10 trading days for 15m/30m, 6 weeks for hourly timeframes and 3 years for D/W/M), more than enough for the default *Max. age* of 30 bars.
+- On tick, range or other non-time charts, the latest candle is always treated as still forming.
+- The chart's timeframe looks back as far as the candles the chart has loaded. Extra timeframes look back about 10 trading days (15m/30m), 6 weeks (hourly) and 3 years (D/W/M), more than enough for the default *Max. age* of 30 bars.
 - Tradesea has no public API for add-ons. The script uses the chart's internal interface, so a platform update can break it until a new version is released.
 - Rays are regular chart drawings. If you save your layout, Tradesea may keep a snapshot of them; the script cleans and redraws its own rays on load.
 

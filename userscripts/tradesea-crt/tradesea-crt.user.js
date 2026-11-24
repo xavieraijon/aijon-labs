@@ -2,9 +2,9 @@
 // @name            Tradesea CRT · Candle Range Theory
 // @name:es         Tradesea CRT · Candle Range Theory
 // @namespace       https://github.com/xavieraijon/aijon-labs
-// @version         1.5.0
-// @description     Detects Candle Range Theory (CRT) setups on any timeframe from 15 minutes to monthly and draws them as Horizontal Rays on Tradesea charts.
-// @description:es  Detecta setups de Candle Range Theory (CRT) en cualquier temporalidad, de 15 minutos a mensual, y los dibuja como Horizontal Rays en los gráficos de Tradesea.
+// @version         1.6.0
+// @description     Draws Candle Range Theory (CRT) setups as Horizontal Rays on Tradesea charts, on whatever timeframe each chart shows (2D, 10H, 33D…), plus any extra timeframes you add.
+// @description:es  Dibuja los setups de Candle Range Theory (CRT) como Horizontal Rays en los gráficos de Tradesea, en la temporalidad que tenga cada gráfico (2D, 10H, 33D…), más las temporalidades extra que añadas.
 // @author          AijonLabs
 // @license         MIT
 // @icon            data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyOTYyRkYiLz48bGluZSB4MT0iOCIgeTE9IjE4IiB4Mj0iNTYiIHkyPSIxOCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1kYXNoYXJyYXk9IjUgMyIvPjxsaW5lIHgxPSI4IiB5MT0iNDYiIHgyPSI1NiIgeTI9IjQ2IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWRhc2hhcnJheT0iNSAzIi8+PGxpbmUgeDE9IjMyIiB5MT0iOSIgeDI9IjMyIiB5Mj0iNTUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48cmVjdCB4PSIyNCIgeT0iMjMiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxOCIgcng9IjIiIGZpbGw9IiNmZmYiLz48L3N2Zz4K
@@ -21,12 +21,12 @@
 /*
  * Tradesea CRT — AijonLabs
  * ------------------------------------------------------------------------------------------------
- * Analysis tool only. It reads candles from the chart's own data feed and draws rays on the chart.
+ * Analysis tool only. It reads candles from the chart and its data feed and draws rays on the chart.
  * It never sends orders, never touches your account and never sends data anywhere.
  * Not affiliated with, endorsed by or supported by Tradesea or TradingView.
  * Nothing drawn by this script is financial advice. Trading futures involves substantial risk.
  *
- * Herramienta solo de análisis: lee velas del propio gráfico y dibuja rayos. No envía órdenes,
+ * Herramienta solo de análisis: lee velas del gráfico y dibuja rayos. No envía órdenes,
  * no toca tu cuenta ni envía datos a ningún sitio. Sin relación con Tradesea ni TradingView.
  * Nada de lo que dibuja es una recomendación de inversión.
  * ------------------------------------------------------------------------------------------------
@@ -36,9 +36,11 @@
   'use strict';
 
   /* ───────────────────────── Timeframes ─────────────────────────
-   * Intraday timeframes are built from a base resolution of the data feed and aligned to the CME
-   * session (18:00 New York), exactly like Tradesea's candles. D and W come straight from the feed
-   * (trading-session candles); M is built from daily candles.
+   * Each chart ALWAYS gets the setups of its own timeframe, whatever it is, read from the candles the
+   * chart itself draws. Optionally, extra timeframes from this list are added on top. Extra intraday
+   * timeframes are built from a base resolution of the data feed, aligned to the CME session (18:00
+   * New York) exactly like Tradesea's candles; D and W come straight from the feed and M is built
+   * from daily candles.
    */
   const TIMEFRAMES = [
     { label: '15m', min: 15,  base: '15', color: '#00BCD4' },
@@ -54,63 +56,64 @@
     { label: 'W',   period: 'W', base: '1W', color: '#455A64' },
     { label: 'M',   period: 'M', base: '1D', color: '#212121' },
   ];
-  const OTHER_TF_COLOR = '#78909C'; // timeframes outside the list (e.g. 5m, 45m), only in "active" mode
+  const CHART_TF_COLOR = '#5C6BC0'; // chart timeframes outside the list above (2D, 10H, 33D…)
 
-  // Data-feed resolutions the script downloads: history on start, then a small refresh window.
+  // Data-feed resolutions the script downloads for extra timeframes (and '1D' to know when a
+  // multi-day chart candle has closed): history on start, then a small refresh window.
   const BASES = {
-    '1':  { countBack: 2000, days: 2,    refreshDays: 1,  minRefreshSec: 0 },
-    '5':  { countBack: 1200, days: 5,    refreshDays: 1,  minRefreshSec: 0 },
-    '15': { countBack: 960,  days: 10,   refreshDays: 2,  minRefreshSec: 0 },
-    '60': { countBack: 720,  days: 30,   refreshDays: 3,  minRefreshSec: 0 },
-    '1D': { countBack: 800,  days: 1200, refreshDays: 10, minRefreshSec: 60 },
-    '1W': { countBack: 150,  days: 1100, refreshDays: 30, minRefreshSec: 60 },
+    '15': { countBack: 960, days: 10,   refreshDays: 2,  minRefreshSec: 25 },
+    '60': { countBack: 720, days: 30,   refreshDays: 3,  minRefreshSec: 25 },
+    '1D': { countBack: 800, days: 1200, refreshDays: 10, minRefreshSec: 60 },
+    '1W': { countBack: 150, days: 1100, refreshDays: 30, minRefreshSec: 60 },
   };
 
   const CFG = {
-    pollSeconds: 30,         // recalculation interval
+    pollSeconds: 15,         // recalculation interval
     sessionStartHourNY: 18,  // CME session start (New York time)
     sessionHours: 23,        // session length (18:00 → 17:00 NY)
     legacyPrefix: 'CRT ',    // label prefix used by pre-1.3 versions (only used to clean old rays)
   };
   const H = 3600000;
+  const DAY = 24 * H;
 
-  // Ray label: "2H High (Bearish)". The script recognises its own rays by this format.
-  const LABEL_RE = /^(\d+m|\d+H|D|W|M) (High|Low|50%) \((Bullish|Bearish)\)$/;
+  // Ray label: "2H High (Bearish)", "33D Low (Bullish)". The script recognises its own rays by this format.
+  const LABEL_RE = /^(?=\w)\d*[A-Za-z]* (High|Low|50%) \((Bullish|Bearish)\)$/;
   const makeLabel = (tf, side, dir) => `${tf} ${side} (${dir === 'bull' ? 'Bullish' : 'Bearish'})`;
   const TEXT_COLOR = { bull: '#089981', bear: '#F23645' }; // label green / red; the line keeps its timeframe colour
 
   /* ───────────────────────── i18n ───────────────────────── */
   const STRINGS = {
     en: {
-      waiting: 'Waiting for the chart…', unsupported: 'Chart timeframe not supported (15m–M, or any minute timeframe)',
-      error: 'Error', tooltip: 'Candle Range Theory · 15m to monthly', drag: 'Drag to move', refresh: 'Recalculate now',
-      settings: 'Settings', on: 'on', off: 'off', enable: 'Enable', disable: 'Disable and remove rays',
-      modeAll: 'all', modeActive: 'active', title: 'CRT · settings', close: 'Close', secTf: 'Timeframes',
-      all: 'Selected timeframes', active: 'Only the chart’s active timeframe', from: 'From', to: 'to',
+      waiting: 'Waiting for the chart…', error: 'Error', tooltip: 'Candle Range Theory on the chart’s timeframe',
+      drag: 'Drag to move', refresh: 'Recalculate now', settings: 'Settings', on: 'on', off: 'off',
+      enable: 'Enable', disable: 'Disable and remove rays', title: 'CRT · settings', close: 'Close',
+      secTf: 'Timeframes', chartTf: 'The chart’s own timeframe, always (any: 2D, 10H, 33D…)',
+      extra: 'Also add ranges from:', from: 'From', to: 'to', none: 'None',
       secShow: 'Show', showActive: 'Active (C2 closed)', showForming: 'Forming (C2 still open)', showMid: '50% level',
       secValid: 'Validity', invClose: 'Invalidate when a candle closes outside the range',
       maxAge: 'Max. age', bars: 'bars', resetPos: 'Reset position', resetAll: 'Restore defaults',
     },
     es: {
-      waiting: 'Esperando al gráfico…', unsupported: 'Temporalidad del gráfico no soportada (15m–M, o cualquiera en minutos)',
-      error: 'Error', tooltip: 'Candle Range Theory · de 15m a mensual', drag: 'Arrastra para mover', refresh: 'Recalcular ahora',
-      settings: 'Ajustes', on: 'on', off: 'off', enable: 'Activar', disable: 'Desactivar y borrar los rayos',
-      modeAll: 'todas', modeActive: 'activa', title: 'CRT · ajustes', close: 'Cerrar', secTf: 'Temporalidades',
-      all: 'Temporalidades marcadas', active: 'Solo la activa del gráfico', from: 'Desde', to: 'hasta',
+      waiting: 'Esperando al gráfico…', error: 'Error', tooltip: 'Candle Range Theory en la temporalidad del gráfico',
+      drag: 'Arrastra para mover', refresh: 'Recalcular ahora', settings: 'Ajustes', on: 'on', off: 'off',
+      enable: 'Activar', disable: 'Desactivar y borrar los rayos', title: 'CRT · ajustes', close: 'Cerrar',
+      secTf: 'Temporalidades', chartTf: 'La del propio gráfico, siempre (cualquiera: 2D, 10H, 33D…)',
+      extra: 'Añadir también rangos de:', from: 'Desde', to: 'hasta', none: 'Ninguna',
       secShow: 'Mostrar', showActive: 'Activos (C2 cerrada)', showForming: 'En formación (C2 abierta)', showMid: 'Nivel 50 %',
       secValid: 'Validez', invClose: 'Invalidar si una vela cierra fuera del rango',
       maxAge: 'Antigüedad máx.', bars: 'velas', resetPos: 'Restablecer posición', resetAll: 'Valores por defecto',
     },
   };
-  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.5.0';
+  const VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '1.6.0';
   const T = STRINGS[(navigator.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en'];
 
   /* ───────────────────────── Settings (persisted) ───────────────────────── */
   const LS_SETTINGS = 'crtTradesea.settings';
+  const SETTINGS_VERSION = 2;
   const DEFAULTS = {
+    v: SETTINGS_VERSION,
     enabled: true,
-    mode: 'all',              // 'all' = selected timeframes | 'active' = the chart's current timeframe only
-    tfs: Object.fromEntries(TIMEFRAMES.map((t) => [t.label, t.label !== 'W' && t.label !== 'M'])),
+    tfs: Object.fromEntries(TIMEFRAMES.map((t) => [t.label, false])), // extra timeframes (none by default)
     showActive: true,         // C2 closed, target not reached yet
     showForming: true,        // C2 is the current (still open) candle
     showMid: false,           // 50% of C1's range
@@ -121,6 +124,7 @@
   function loadSettings() {
     try {
       const s = JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}');
+      if (s.v !== SETTINGS_VERSION) { delete s.mode; delete s.tfs; s.v = SETTINGS_VERSION; } // ≤1.5: the chart's timeframe is now automatic
       return { ...DEFAULTS, ...s, tfs: { ...DEFAULTS.tfs, ...(s.tfs || {}) } };
     } catch (e) { return { ...DEFAULTS, tfs: { ...DEFAULTS.tfs } }; }
   }
@@ -139,9 +143,9 @@
     drawn: new Map(),        // chart index → { sig, ids }
     hooked: new WeakSet(),   // charts with event subscriptions
     subs: [],                // [subject, callback] pairs, to unsubscribe on stop
+    chartTfs: [],            // labels of the charts' timeframes, for the badge
     lastRun: null,
     lastCount: 0,
-    note: '',
     error: null,
   };
 
@@ -198,50 +202,93 @@
     return bars;
   }
 
-  // Chart resolution → timeframe description (null when unsupported).
-  function tfForResolution(res) {
-    const r = String(res).toUpperCase();
-    if (/^\d+$/.test(r)) {
-      const n = Number(r);
-      const preset = TIMEFRAMES.find((t) => t.min === n);
-      if (preset) return preset;
-      if (n >= 1440) return null;
-      const base = [60, 15, 5, 1].find((b) => n % b === 0);
-      return { label: n % 60 === 0 ? `${n / 60}H` : `${n}m`, min: n, base: String(base), color: OTHER_TF_COLOR };
-    }
-    const m = r.match(/^(1?)([DWM])$/);
-    return m ? TIMEFRAMES.find((t) => t.period === m[2]) : null;
-  }
-  const isPeriodChart = (chart) => /^\d*[DWM]$/i.test(String(chart.resolution()));
-
   function hookChart(chart) {
     if (state.hooked.has(chart)) return;
     state.hooked.add(chart);
     const again = () => setTimeout(run, 300);
-    for (const getSubj of [() => chart.onIntervalChanged(), () => chart.onSymbolChanged()]) {
+    for (const getSubj of [() => chart.onIntervalChanged(), () => chart.onSymbolChanged(), () => chart.onDataLoaded()]) {
       try { const subj = getSubj(); subj.subscribe(null, again); state.subs.push([subj, again]); } catch (e) { /* not available */ }
     }
   }
 
-  /* ───────────────────────── Candle building ───────────────────────── */
+  /* ───────────────────────── Time helpers ───────────────────────── */
   const nyFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   function nyParts(ms) {
     const o = {};
     for (const p of nyFmt.formatToParts(new Date(ms))) o[p.type] = p.value;
     return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute };
   }
+  // Start of the CME session (18:00 New York) that contains ms.
+  function sessionStartOf(ms) {
+    const p = nyParts(ms);
+    const off = ((p.h - CFG.sessionStartHourNY + 24) % 24) * 60 + p.mi;
+    return ms - (ms % 60000) - off * 60000;
+  }
 
-  // Intraday: group base candles into buckets of tfMin minutes counted from the session start.
-  // Each candle: s = real start (ms), end, o/h/l/c, closed.
+  /* ───────────────────────── The chart's own timeframe ─────────────────────────
+   * Resolution strings: "15" (minutes), "600" (10H), "30S", "2D", "33D", "1W", "3M"…
+   */
+  function parseResolution(res) {
+    const r = String(res).toUpperCase();
+    let m;
+    if (/^\d+$/.test(r)) {
+      const n = Number(r);
+      return { unit: 'min', n, label: n % 60 === 0 ? `${n / 60}H` : `${n}m` };
+    }
+    if ((m = r.match(/^(\d*)([SDWM])$/))) {
+      const n = Number(m[1] || 1);
+      const unit = m[2];
+      if (unit === 'S') return { unit, n, label: `${n}s` };
+      return { unit, n, label: n === 1 ? unit : `${n}${unit}` };
+    }
+    return { unit: 'other', n: 1, label: r };
+  }
+
+  // Candles the chart itself draws, with their open/closed state.
+  async function chartBars(chart, df, ticker, runCache) {
+    const res = parseResolution(chart.resolution());
+    const exp = await chart.exportData({ includeTime: true, includeSeries: true, includedStudies: [] });
+    const rows = (exp && exp.data) || [];
+    const bars = rows
+      .filter((r) => r[0] != null && r[2] != null && r[3] != null && r[4] != null)
+      .map((r) => ({ s: r[0] * 1000, o: r[1], h: r[2], l: r[3], c: r[4], closed: true }));
+    if (!bars.length) return { res, bars };
+    bars[bars.length - 1].closed = await lastBarClosed(bars[bars.length - 1].s, res, df, ticker, runCache);
+    return { res, bars };
+  }
+
+  // Has the chart's latest candle finished?
+  async function lastBarClosed(start, res, df, ticker, runCache) {
+    const now = Date.now();
+    if (res.unit === 'S' || res.unit === 'min') {
+      const len = res.unit === 'S' ? res.n * 1000 : res.n * 60000;
+      const sessionEnd = sessionStartOf(start) + CFG.sessionHours * H;
+      return now >= Math.min(start + len, sessionEnd);
+    }
+    if (res.unit === 'D') {
+      // count the trading days that have started since the candle opened, using the feed's daily candles
+      const daily = await loadBase(df, ticker, '1D', runCache);
+      const inBar = daily.filter((x) => x.time - 7 * H >= start - H); // daily time = midnight Chicago; session opens 7 h earlier
+      if (inBar.length < res.n) return false;
+      return now >= inBar[inBar.length - 1].time + 16 * H;            // that trading day ends at 17:00 New York
+    }
+    if (res.unit === 'W') return now >= start + (res.n - 1) * 7 * DAY + 5 * DAY - H; // Sunday 18:00 → Friday 17:00 NY
+    if (res.unit === 'M') {
+      const p = nyParts(start + 6 * H); // trade date of the first session
+      return now >= Date.UTC(p.y, p.mo - 1 + res.n, 1) - 2 * H;
+    }
+    return false; // unknown kind of candle (ticks, ranges…): treat the latest one as still forming
+  }
+
+  /* ───────────────────────── Extra timeframes (from the data feed) ───────────────────────── */
   function aggregate(base, tfMin) {
     const now = Date.now();
     const map = new Map();
     for (const x of base) {
-      const p = nyParts(x.time);
-      const off = ((p.h - CFG.sessionStartHourNY + 24) % 24) * 60 + p.mi;   // minutes since session start
-      const sessionStart = x.time - off * 60000;
-      const start = sessionStart + Math.floor(off / tfMin) * tfMin * 60000;
-      const end = Math.min(start + tfMin * 60000, sessionStart + CFG.sessionHours * H);
+      const ss = sessionStartOf(x.time);
+      const off = (x.time - ss) / 60000;
+      const start = ss + Math.floor(off / tfMin) * tfMin * 60000;
+      const end = Math.min(start + tfMin * 60000, ss + CFG.sessionHours * H);
       const g = map.get(start);
       if (!g) map.set(start, { s: start, end, o: x.open, h: x.high, l: x.low, c: x.close });
       else { g.h = Math.max(g.h, x.high); g.l = Math.min(g.l, x.low); g.c = x.close; }
@@ -251,28 +298,27 @@
     return out;
   }
 
-  // D and W from the feed. Their time is midnight Chicago of the trade date (Monday for W);
-  // the session really starts 7 hours earlier (18:00 New York) and the day ends 16 hours later (17:00 NY).
+  // D and W from the feed: their time is midnight Chicago of the trade date (Monday for W); the
+  // session really starts 7 hours earlier (18:00 New York) and the day ends 16 hours later (17:00 NY).
   function periodBars(base, period) {
     const now = Date.now();
     const toBar = (x) => ({ s: x.time - 7 * H, o: x.open, h: x.high, l: x.low, c: x.close });
     if (period === 'D' || period === 'W') {
       return base.map((x) => {
         const b = toBar(x);
-        b.end = x.time + (period === 'D' ? 16 * H : 4 * 24 * H + 16 * H);
+        b.end = x.time + (period === 'D' ? 16 * H : 4 * DAY + 16 * H);
         b.closed = now >= b.end;
         return b;
       });
     }
-    // M: group daily candles by the month of their trade date.
-    const map = new Map();
+    const map = new Map(); // M: daily candles grouped by the month of their trade date
     for (const x of base) {
       const d = new Date(x.time);
       const key = d.getUTCFullYear() * 12 + d.getUTCMonth();
       const g = map.get(key);
       if (!g) {
         const b = toBar(x);
-        b.end = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 2 * H; // last calendar day, ~17:00 NY
+        b.end = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 2 * H;
         map.set(key, b);
       } else { g.h = Math.max(g.h, x.high); g.l = Math.min(g.l, x.low); g.c = x.close; }
     }
@@ -290,7 +336,7 @@
    * Invalid:    price goes beyond C2's sweep wick                  → removed.
    *             a later candle closes outside C1 on the swept side → removed (optional).
    */
-  function detect(bars, tf) {
+  function detect(bars, label, color, fromChart) {
     const out = [];
     const n = bars.length;
     for (let i = Math.max(1, n - 1 - S.maxAgeBars); i < n; i++) {
@@ -310,25 +356,18 @@
         if (S.invalidateOnClose && x.closed && (dir === 'bull' ? x.c < c1.l : x.c > c1.h)) { alive = false; break; }
       }
       if (!alive) continue;
-      out.push({ tf: tf.label, color: tf.color, dir, forming, s: c1.s, high: c1.h, low: c1.l, mid: (c1.h + c1.l) / 2 });
+      out.push({ tf: label, color, dir, forming, fromChart, s: c1.s, high: c1.h, low: c1.l, mid: (c1.h + c1.l) / 2 });
     }
     return out;
   }
 
-  function timeframesFor(chart) {
-    if (S.mode === 'active') {
-      const tf = tfForResolution(chart.resolution());
-      return tf ? [tf] : [];
-    }
-    return TIMEFRAMES.filter((t) => S.tfs[t.label]);
-  }
-
   /* ───────────────────────── Drawing ───────────────────────── */
-  // Where a ray starts. On intraday charts: the real start of C1. On D/W/M charts: C1's trade date,
-  // so the ray starts on the right daily candle (a session that opens at 18:00 belongs to the next day).
+  // Where a ray starts: on intraday charts, the real start of C1. On D/W/M (and 2D, 33D…) charts the
+  // chart places drawings by trade date, so the ray goes at midday of C1's trade date (a session that
+  // opens at 18:00 New York belongs to the next day) and lands on the right candle.
   function shapeTime(item, periodChart) {
     if (!periodChart) return Math.floor(item.s / 1000);
-    const p = nyParts(item.s + 6 * H);
+    const p = nyParts(sessionStartOf(item.s) + 6 * H);
     return Date.UTC(p.y, p.mo - 1, p.d, 12) / 1000;
   }
 
@@ -346,9 +385,9 @@
     for (const s of shapes) if (isOurShape(chart, s)) { try { chart.removeEntity(s.id); } catch (e) { /* already gone */ } }
   }
 
-  async function drawChart(chart, idx, items, ticker) {
-    const periodChart = isPeriodChart(chart);
-    const sig = [ticker, S.showMid, periodChart, JSON.stringify(items.map((i) => [i.tf, i.dir, i.forming, i.s, i.high, i.low]))].join('|');
+  async function drawChart(chart, idx, items, ticker, resolution) {
+    const periodChart = /^\d*[DWM]$/i.test(String(resolution));
+    const sig = [ticker, resolution, S.showMid, JSON.stringify(items.map((i) => [i.tf, i.dir, i.forming, i.s, i.high, i.low]))].join('|');
     const prev = state.drawn.get(idx);
     if (prev && prev.sig === sig) {
       let existing = new Set();
@@ -387,26 +426,31 @@
       if (!tv) { state.error = T.waiting; return; }
       const count = tv.api.chartsCount ? tv.api.chartsCount() : 1;
       const runCache = new Map();
+      const chartTfs = [];
       let total = 0;
-      let unsupported = false;
       for (let i = 0; i < count; i++) {
         const chart = tv.api.chart(i);
         hookChart(chart);
         if (!S.enabled) { clearChart(chart); state.drawn.delete(i); continue; }
-        const tfs = timeframesFor(chart);
-        if (S.mode === 'active' && !tfs.length) unsupported = true;
         const ticker = chart.symbol();
-        const items = [];
-        for (const tf of tfs) {
+        const resolution = chart.resolution();
+        // 1) the chart's own timeframe, always
+        const { res, bars } = await chartBars(chart, tv.df, ticker, runCache);
+        const preset = TIMEFRAMES.find((t) => t.label === res.label);
+        const items = detect(bars, res.label, preset ? preset.color : CHART_TF_COLOR, true);
+        chartTfs.push(res.label);
+        // 2) extra timeframes, if any (skipping the chart's own)
+        for (const tf of TIMEFRAMES) {
+          if (!S.tfs[tf.label] || tf.label === res.label) continue;
           const base = await loadBase(tv.df, ticker, tf.base, runCache);
-          items.push(...detect(buildBars(tf, base), tf));
+          items.push(...detect(buildBars(tf, base), tf.label, tf.color, false));
         }
-        await drawChart(chart, i, items, ticker);
+        await drawChart(chart, i, items, ticker, resolution);
         total += items.length;
       }
+      state.chartTfs = [...new Set(chartTfs)];
       state.lastCount = total;
       state.lastRun = new Date();
-      state.note = unsupported ? T.unsupported : '';
       state.error = null;
     } catch (e) {
       state.error = e && e.message ? e.message : String(e);
@@ -427,7 +471,7 @@
   host.id = 'crt-tradesea-host';
   host.style.cssText = 'all:initial;display:block !important;visibility:visible !important;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483000';
   const root = host.attachShadow({ mode: 'open' });
-  const tfOptions = TIMEFRAMES.map((t) => `<option value="${t.label}">${t.label}</option>`).join('');
+  const tfOptions = '<option value="">—</option>' + TIMEFRAMES.map((t) => `<option value="${t.label}">${t.label}</option>`).join('');
   root.innerHTML = `
     <style>
       :host { all: initial; }
@@ -453,9 +497,10 @@
       .sec { margin: 8px 0; }
       .sec-title { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin-bottom: 4px; }
       label { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; }
-      .tfbox { margin: 4px 0 4px 20px; }
-      .tfbox.disabled { opacity: .4; pointer-events: none; }
-      .range { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+      .always { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+      .check { color: #089981; font-weight: 700; width: 13px; text-align: center; }
+      .extra { margin-top: 6px; }
+      .range { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
       select { font: inherit; padding: 1px 2px; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
       .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px 6px; }
       .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
@@ -473,12 +518,13 @@
       <div class="head"><span>${T.title}</span><button class="close" title="${T.close}" aria-label="${T.close}">✕</button></div>
       <div class="sec">
         <div class="sec-title">${T.secTf}</div>
-        <label><input type="radio" name="mode" value="all"> ${T.all}</label>
-        <div class="tfbox">
-          <div class="range">${T.from} <select class="from">${tfOptions}</select> ${T.to} <select class="to">${tfOptions}</select></div>
+        <div class="always"><span class="check">✓</span>${T.chartTf}</div>
+        <div class="extra">
+          <div>${T.extra}</div>
+          <div class="range">${T.from} <select class="from">${tfOptions}</select> ${T.to} <select class="to">${tfOptions}</select>
+            <button class="noneBtn">${T.none}</button></div>
           <div class="grid tfs"></div>
         </div>
-        <label><input type="radio" name="mode" value="active"> ${T.active}</label>
       </div>
       <div class="sec">
         <div class="sec-title">${T.secShow}</div>
@@ -511,12 +557,10 @@
   }
 
   function renderPanel() {
-    root.querySelectorAll('input[name=mode]').forEach((r) => { r.checked = r.value === S.mode; });
-    $('.tfbox').classList.toggle('disabled', S.mode !== 'all');
     grid.querySelectorAll('input[data-tf]').forEach((c) => { c.checked = !!S.tfs[c.dataset.tf]; });
     const on = TIMEFRAMES.filter((t) => S.tfs[t.label]);
-    $('.from').value = (on[0] || TIMEFRAMES[0]).label;
-    $('.to').value = (on[on.length - 1] || TIMEFRAMES[TIMEFRAMES.length - 1]).label;
+    $('.from').value = on.length ? on[0].label : '';
+    $('.to').value = on.length ? on[on.length - 1].label : '';
     $('.showActive').checked = S.showActive;
     $('.showForming').checked = S.showForming;
     $('.showMid').checked = S.showMid;
@@ -526,27 +570,29 @@
 
   function renderBadge() {
     const hhmm = state.lastRun ? state.lastRun.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-    const modeTxt = S.mode === 'active' ? T.modeActive : T.modeAll;
-    dot.style.background = !S.enabled ? '#bbb' : state.error ? '#F44336' : state.note ? '#FFC107' : '#4CAF50';
-    label.textContent = S.enabled ? `CRT (${modeTxt}) · ${state.lastCount} · ${hhmm}` : `CRT · ${T.off}`;
+    const extras = TIMEFRAMES.filter((t) => S.tfs[t.label]).length;
+    const tfs = state.chartTfs.join(', ') + (extras ? ` +${extras}` : '');
+    dot.style.background = !S.enabled ? '#bbb' : state.error ? '#F44336' : '#4CAF50';
+    label.textContent = S.enabled ? `CRT${tfs ? ` (${tfs})` : ''} · ${state.lastCount} · ${hhmm}` : `CRT · ${T.off}`;
     const toggle = $('.toggle');
     toggle.textContent = S.enabled ? T.off : T.on;
     toggle.title = S.enabled ? T.disable : T.enable;
-    badge.title = state.error ? `${T.error}: ${state.error}` : state.note || T.tooltip;
+    badge.title = state.error ? `${T.error}: ${state.error}` : T.tooltip;
   }
 
   // Panel events
-  root.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener('change', () => { S.mode = r.value; applyChange(); }));
   grid.addEventListener('change', (e) => { const tf = e.target.dataset.tf; if (tf) { S.tfs[tf] = e.target.checked; applyChange(); } });
   const applyRange = () => {
     const idx = (v) => TIMEFRAMES.findIndex((t) => t.label === v);
-    let a = idx($('.from').value), b = idx($('.to').value);
+    const from = $('.from').value || $('.to').value, to = $('.to').value || $('.from').value;
+    let a = idx(from), b = idx(to); // both empty → -1/-1 → nothing ticked
     if (a > b) [a, b] = [b, a];
     TIMEFRAMES.forEach((t, i) => { S.tfs[t.label] = i >= a && i <= b; });
     applyChange();
   };
   $('.from').addEventListener('change', applyRange);
   $('.to').addEventListener('change', applyRange);
+  $('.noneBtn').addEventListener('click', () => { TIMEFRAMES.forEach((t) => { S.tfs[t.label] = false; }); applyChange(); });
   $('.showActive').addEventListener('change', (e) => { S.showActive = e.target.checked; applyChange(); });
   $('.showForming').addEventListener('change', (e) => { S.showForming = e.target.checked; applyChange(); });
   $('.showMid').addEventListener('change', (e) => { S.showMid = e.target.checked; applyChange(); });
