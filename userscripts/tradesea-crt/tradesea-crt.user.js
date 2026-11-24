@@ -471,7 +471,7 @@
   host.id = 'crt-tradesea-host';
   host.style.cssText = 'all:initial;display:block !important;visibility:visible !important;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483000';
   const root = host.attachShadow({ mode: 'open' });
-  const tfOptions = TIMEFRAMES.map((t) => `<option value="${t.label}">${t.label}</option>`).join('');
+  const tfOptions = '<option value="">—</option>' + TIMEFRAMES.map((t) => `<option value="${t.label}">${t.label}</option>`).join('');
   root.innerHTML = `
     <style>
       :host { all: initial; }
@@ -559,8 +559,8 @@
   function renderPanel() {
     grid.querySelectorAll('input[data-tf]').forEach((c) => { c.checked = !!S.tfs[c.dataset.tf]; });
     const on = TIMEFRAMES.filter((t) => S.tfs[t.label]);
-    $('.from').value = (on[0] || TIMEFRAMES[0]).label;
-    $('.to').value = (on[on.length - 1] || TIMEFRAMES[0]).label;
+    $('.from').value = on.length ? on[0].label : '';
+    $('.to').value = on.length ? on[on.length - 1].label : '';
     $('.showActive').checked = S.showActive;
     $('.showForming').checked = S.showForming;
     $('.showMid').checked = S.showMid;
@@ -584,7 +584,8 @@
   grid.addEventListener('change', (e) => { const tf = e.target.dataset.tf; if (tf) { S.tfs[tf] = e.target.checked; applyChange(); } });
   const applyRange = () => {
     const idx = (v) => TIMEFRAMES.findIndex((t) => t.label === v);
-    let a = idx($('.from').value), b = idx($('.to').value);
+    const from = $('.from').value || $('.to').value, to = $('.to').value || $('.from').value;
+    let a = idx(from), b = idx(to); // both empty → -1/-1 → nothing ticked
     if (a > b) [a, b] = [b, a];
     TIMEFRAMES.forEach((t, i) => { S.tfs[t.label] = i >= a && i <= b; });
     applyChange();
