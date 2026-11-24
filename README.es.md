@@ -5,15 +5,16 @@
   </picture>
 </p>
 
-<p align="center"><em>Plugins para Claude Code, creados y mantenidos por Xavi Aijon.</em></p>
+<p align="center"><em>Plugins para Claude Code y userscripts para el navegador, creados y mantenidos por Xavi Aijon.</em></p>
 
 *[Read in English](README.md)*
 
 [![CI](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml/badge.svg)](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 
-Un marketplace de plugins para [Claude Code](https://code.claude.com). De momento tiene un plugin, `coolify-ops`,
-para autoalojar tus despliegues; vendrán más (skills, hooks y mods de la interfaz), y cada uno se instala por
+Un marketplace de plugins para [Claude Code](https://code.claude.com), y algunos userscripts para el navegador.
+De momento tiene un plugin, `coolify-ops`, para autoalojar tus despliegues, y un userscript, `tradesea-crt`, para
+quien opera en Tradesea. Vendrán más plugins (skills, hooks y mods de la interfaz), y cada uno se instala por
 separado.
 
 ## Instalar
@@ -32,6 +33,16 @@ refresca el catálogo y `/plugin update coolify-ops@aijon-labs` instala la versi
 | Plugin | Qué hace | Necesitas | Para empezar |
 |---|---|---|---|
 | [`coolify-ops`](plugins/coolify-ops/README.es.md) | Gestiona tu propio servidor [Coolify](https://coolify.io) (un Heroku/Vercel autoalojado) desde Claude Code: móntalo en un VPS o en casa, y despliega en él tus proyectos —escribe el Dockerfile si no tienen (FastAPI, Django, Laravel, Next.js, Nuxt, SPAs y más)— con dominio HTTPS, PostgreSQL opcional con copias de seguridad y despliegue automático en cada push, todo por la API de Coolify | Un VPS o un servidor en casa, un dominio, GitHub (`gh` con sesión iniciada), y Docker y Python 3.10+ en tu ordenador ([detalles](plugins/coolify-ops/README.es.md#requisitos)) | [README](plugins/coolify-ops/README.es.md) · tutorial [Coolify desde cero](docs/es/coolify-desde-cero.md) · [app de ejemplo](examples/hello-fastapi/) (con el servidor ya montado) |
+
+## Userscripts
+
+Pequeñas herramientas que funcionan en tu navegador con un gestor de userscripts
+([Tampermonkey](https://www.tampermonkey.net/) o [Violentmonkey](https://violentmonkey.github.io/)). No necesitan
+Claude Code: pulsas *Instalar*, confirmas y se actualizan solas desde este repositorio.
+
+| Userscript | Qué hace | Funciona en | Para empezar |
+|---|---|---|---|
+| [`tradesea-crt`](userscripts/tradesea-crt/README.es.md) | Encuentra los setups de Candle Range Theory (CRT) en todas las temporalidades de 12H a 1H y dibuja su rango como Horizontal Rays en tus gráficos, en tiempo real: los setups completados o invalidados desaparecen solos | [Tradesea](https://app.tradesea.ai) en Chrome, Edge o Firefox | [Instalar](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js) · [README](userscripts/tradesea-crt/README.es.md) |
 
 Versiones y cambios: [CHANGELOG](CHANGELOG.md) (en inglés) y
 [releases](https://github.com/xavieraijon/aijon-labs/releases) (etiquetas `<plugin>-v<versión>`).
@@ -57,6 +68,9 @@ plugins/<plugin>/
   skills/<skill>/SKILL.md         instrucciones de la skill (+ scripts/, templates/, reference/)
   tests/                          tests de pytest (sin red)
   README.md
+userscripts/<nombre>/
+  <nombre>.user.js                el userscript (un solo archivo, sin dependencias)
+  README.md, README.es.md
 examples/                         apps de ejemplo para probar los plugins
 docs/en/, docs/es/                tutoriales y guías para contribuir
 ```
@@ -74,4 +88,4 @@ python3 -m venv .venv && .venv/bin/pip install pytest ruff
 
 ## Licencia
 
-[MIT](LICENSE). Sin relación oficial con Coolify ni con Anthropic.
+[MIT](LICENSE). Sin relación oficial con Coolify, Anthropic, Tradesea ni TradingView.

@@ -1,8 +1,29 @@
 # Changelog
 
-All notable changes to the plugins of this marketplace. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and each plugin follows
+All notable changes to the plugins and userscripts of this repository. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and each plugin or userscript follows
 [Semantic Versioning](https://semver.org) on its own.
+
+## tradesea-crt
+
+Userscript for Tradesea (installed with Tampermonkey or Violentmonkey, not through Claude Code).
+
+### 1.4.0 — 2026-11-24
+
+First public release.
+
+#### Added
+- Candle Range Theory detection on 12H, 8H, 6H, 4H, 3H, 2H and 1H, built from 1H candles aligned to the CME
+  session (18:00 New York) so they match Tradesea's candles one to one.
+- Each setup is drawn as two Horizontal Rays from C1 (`2H High (Bearish)`, `2H Low (Bearish)`): line colour by
+  timeframe, label green for bullish and red for bearish, dashed while C2 is still open.
+- Completed setups (opposite extreme reached) and invalidated ones (C2's wick broken, or optionally a later
+  candle closing outside C1 on the swept side) are removed automatically.
+- Recalculates every 30 seconds and at once when the symbol or timeframe changes; works on split layouts.
+- Draggable badge with a settings panel: all selected timeframes or only the chart's active one, active/forming
+  filters, 50% level, invalidation on close and maximum age. Settings and position are kept in the browser.
+- English and Spanish interface, chosen from the browser language.
+- Automatic updates from this repository through `@updateURL`.
 
 ## coolify-ops
 

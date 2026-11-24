@@ -10,5 +10,10 @@
   error, and a useful `--help`. They are run with `python3 -I` (no code is loaded from the current folder).
 - **Nothing personal in the repo:** no IPs, domains, uuids, emails or secrets. Each user's data lives in
   `~/.config/<plugin>/` (or `${CLAUDE_PLUGIN_DATA}` when it never needs editing by hand).
+- **Userscripts** live in `userscripts/<name>/<name>.user.js`: one plain JavaScript file, no dependencies, no
+  network requests of their own and no remote code. Their `@version` follows semver and goes up with every
+  published change (with a `CHANGELOG.md` entry); `@updateURL` and `@downloadURL` point to the raw file on `main`,
+  so users only get a change once it is merged. Interface text in English and Spanish, chosen from the browser
+  language.
 - **Tests** with pytest in `plugins/<name>/tests/`, offline: APIs, ssh and Docker are mocked with `monkeypatch`.
 - **Before publishing:** `ruff check .`, `pytest -q plugins` and `claude plugin validate . --strict`.

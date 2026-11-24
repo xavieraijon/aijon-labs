@@ -5,16 +5,16 @@
   </picture>
 </p>
 
-<p align="center"><em>Claude Code plugins, built and maintained by Xavi Aijon.</em></p>
+<p align="center"><em>Claude Code plugins and browser userscripts, built and maintained by Xavi Aijon.</em></p>
 
 *[Leer en castellano](README.es.md)*
 
 [![CI](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml/badge.svg)](https://github.com/xavieraijon/aijon-labs/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A [Claude Code](https://code.claude.com) plugin marketplace. Today it has one plugin, `coolify-ops`, for
-self-hosted deployments; more plugins (skills, hooks and interface mods) are planned, and each installs on its
-own.
+A [Claude Code](https://code.claude.com) plugin marketplace, plus a few browser userscripts. Today it has one
+plugin, `coolify-ops`, for self-hosted deployments, and one userscript, `tradesea-crt`, for traders on Tradesea.
+More plugins (skills, hooks and interface mods) are planned, and each installs on its own.
 
 ## Install
 
@@ -32,6 +32,16 @@ catalogue, `/plugin update coolify-ops@aijon-labs` installs the new version (res
 | Plugin | What it does | You need | Get started |
 |---|---|---|---|
 | [`coolify-ops`](plugins/coolify-ops/) | Run your own [Coolify](https://coolify.io) server (a self-hosted Heroku/Vercel) from Claude Code: set it up on a VPS or a home server, then deploy your projects to it — it writes the Dockerfile if missing (FastAPI, Django, Laravel, Next.js, Nuxt, SPAs and more) — with an HTTPS domain, optional PostgreSQL with backups and auto-deploy on every push, all through the Coolify API | A VPS or home server, a domain, GitHub (`gh` signed in), and Docker and Python 3.10+ on your computer ([details](plugins/coolify-ops/README.md#requirements)) | [README](plugins/coolify-ops/) · tutorial [Coolify from scratch](docs/en/coolify-from-scratch.md) · [example app](examples/hello-fastapi/) (once the server is set up) |
+
+## Userscripts
+
+Small tools that run in your browser with a userscript manager ([Tampermonkey](https://www.tampermonkey.net/) or
+[Violentmonkey](https://violentmonkey.github.io/)). They do not need Claude Code: click *Install*, confirm, and
+they update themselves from this repository.
+
+| Userscript | What it does | Works on | Get started |
+|---|---|---|---|
+| [`tradesea-crt`](userscripts/tradesea-crt/) | Finds Candle Range Theory (CRT) setups on every timeframe from 12H to 1H and draws their range as Horizontal Rays on your charts, updated live: completed and invalidated setups disappear on their own | [Tradesea](https://app.tradesea.ai) in Chrome, Edge or Firefox | [Install](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js) · [README](userscripts/tradesea-crt/) |
 
 Versions and changes: [CHANGELOG](CHANGELOG.md) and [releases](https://github.com/xavieraijon/aijon-labs/releases)
 (tagged `<plugin>-v<version>`).
@@ -57,6 +67,9 @@ plugins/<plugin>/
   skills/<skill>/SKILL.md         skill instructions (+ scripts/, templates/, reference/)
   tests/                          pytest tests (offline)
   README.md
+userscripts/<name>/
+  <name>.user.js                  the userscript (single file, no dependencies)
+  README.md, README.es.md
 examples/                         sample apps to try the plugins
 docs/en/, docs/es/                tutorials and contributor guides
 ```
@@ -74,4 +87,4 @@ python3 -m venv .venv && .venv/bin/pip install pytest ruff
 
 ## License
 
-[MIT](LICENSE). Not affiliated with Coolify or Anthropic.
+[MIT](LICENSE). Not affiliated with Coolify, Anthropic, Tradesea or TradingView.
