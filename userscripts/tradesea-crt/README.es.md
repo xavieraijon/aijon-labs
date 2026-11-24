@@ -42,11 +42,36 @@ Tradesea no permite añadir indicadores propios. **Tradesea CRT** añade el que 
 
 1. Instala un gestor de userscripts:
    [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Edge, Firefox, Safari) o [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Edge, Firefox).
-2. **Solo en Chrome / Edge**: abre los detalles de la extensión (`chrome://extensions` → Tampermonkey → *Detalles*) y activa **Permitir scripts de usuario**. En versiones antiguas, activa en su lugar el *Modo de desarrollador*. Sin este paso el script no se ejecuta.
+2. **Permite los scripts de usuario** (Chrome, Brave, Edge, Opera, Vivaldi). Sin este paso el script no se ejecuta.
+   1. Abre los detalles de Tampermonkey: clic derecho en el icono de Tampermonkey → **Gestionar extensión** (*Administrar extensión* en español de Latinoamérica), o pega esta dirección en una pestaña nueva:
+      - Chrome, Brave, Vivaldi: `chrome://extensions/?id=dhdgffkkebhmkfjojejmpbldmpobfkfo`
+      - Edge: `edge://extensions/?id=iikmkjmpaadaobahmlepeloendndfphd`
+   2. Activa el interruptor **Permitir secuencias de comandos del usuario**. Ese es el nombre en español; en otros idiomas, mira [la tabla de abajo](#nombre-del-interruptor-en-cada-idioma).
+   3. El navegador avisa de que la extensión podrá ejecutar código que no ha revisado. Es lo normal con cualquier gestor de userscripts.
+
+   Los navegadores basados en una versión de Chromium anterior a la 138 (Chrome 138 salió a mediados de 2025) no tienen ese interruptor: activa en su lugar el **Modo Desarrollador** (*Modo de desarrollador* en español de Latinoamérica), arriba a la derecha de la página de extensiones.
+
+   En Firefox y Safari no hace falta este paso.
 3. Pulsa **[Instalar](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js)** y confirma en el gestor de userscripts.
 4. Abre o recarga [app.tradesea.ai](https://app.tradesea.ai/trade). La pastilla **CRT** aparece abajo a la izquierda del gráfico.
 
 Las actualizaciones son automáticas: el gestor de userscripts comprueba este repositorio e instala las versiones nuevas por ti.
+
+#### Nombre del interruptor en cada idioma
+
+Sacado de las traducciones del propio Chromium, que Chrome, Brave y Vivaldi usan tal cual. Edge y Opera traducen parte de su interfaz por su cuenta, así que en ellos el texto puede variar un poco.
+
+| Idioma | Interruptor en los detalles de Tampermonkey (138+) | Antes de la 138: en la página de extensiones |
+|---|---|---|
+| Español (España y Latinoamérica) | Permitir secuencias de comandos del usuario | Modo Desarrollador (España) · Modo de desarrollador (Latinoamérica) |
+| Català | Permet els scripts d'usuari | Mode de desenvolupador |
+| English (US) | Allow User Scripts | Developer mode |
+| English (UK) | Allow user scripts | Developer mode |
+| Français | Autoriser les scripts utilisateur | Mode développeur |
+| Deutsch | Nutzerscripts zulassen | Entwicklermodus |
+| Italiano | Consenti script utente | Modalità sviluppatore |
+| Português (Brasil) | Permitir scripts de usuário | Modo do desenvolvedor |
+| Português (Portugal) | Permitir scripts do utilizador | Modo de programador |
 
 ## Cómo se usa
 
@@ -108,7 +133,7 @@ Las temporalidades intradía se construyen a partir de velas de 15 minutos o de 
 
 | Problema | Solución |
 |---|---|
-| No aparece la pastilla | Comprueba que *Permitir scripts de usuario* o el *Modo de desarrollador* estén activados (paso 2) y que el script esté habilitado en el gestor. Recarga la página. |
+| No aparece la pastilla | Comprueba que *Permitir secuencias de comandos del usuario* (o el *Modo Desarrollador* antes de la versión 138) esté activado (paso 2; en otros idiomas, [ver la tabla](#nombre-del-interruptor-en-cada-idioma)) y que el script esté habilitado en el gestor. Recarga la página. |
 | Punto rojo | Pasa el ratón por la pastilla para ver el error. Si Tradesea ha cambiado su plataforma, actualiza el script o [abre una incidencia](https://github.com/xavieraijon/aijon-labs/issues). |
 | Punto ámbar | Estás en modo *activa* con una temporalidad que el script no puede leer (segundos, o múltiplos como 2D). Cambia de temporalidad o de modo. |
 | Demasiados rayos | Desmarca temporalidades, cambia al modo *activa* o baja la *Antigüedad máx.* |

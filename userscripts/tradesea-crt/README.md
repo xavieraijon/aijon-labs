@@ -42,11 +42,36 @@ Tradesea does not let you add custom indicators. **Tradesea CRT** adds the one m
 
 1. Install a userscript manager:
    [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Edge, Firefox, Safari) or [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Edge, Firefox).
-2. **Chrome / Edge only**: open the extension's details page (`chrome://extensions` → Tampermonkey → *Details*) and turn on **Allow User Scripts**. On older versions, enable *Developer mode* instead. Without this step the script will not run.
+2. **Allow user scripts** (Chrome, Brave, Edge, Opera, Vivaldi). Without this step the script does not run.
+   1. Open Tampermonkey's details page: right-click the Tampermonkey icon → **Manage extension**, or paste this address into a new tab:
+      - Chrome, Brave, Vivaldi: `chrome://extensions/?id=dhdgffkkebhmkfjojejmpbldmpobfkfo`
+      - Edge: `edge://extensions/?id=iikmkjmpaadaobahmlepeloendndfphd`
+   2. Turn on the switch whose name depends on your browser's language (see [the table below](#name-of-the-switch-in-each-language)). In English it is **Allow User Scripts**.
+   3. The browser warns that the extension can run code it has not reviewed. That is expected for any userscript manager.
+
+   Browsers based on Chromium older than 138 (Chrome 138 came out in mid-2025) have no such switch: turn on **Developer mode** at the top right of the extensions page instead.
+
+   Firefox and Safari do not need this step.
 3. Click **[Install](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js)** and confirm in the userscript manager.
 4. Open or reload [app.tradesea.ai](https://app.tradesea.ai/trade). The **CRT** badge appears at the bottom left of the chart.
 
 Updates are automatic: your userscript manager checks this repository and installs new versions for you.
+
+#### Name of the switch in each language
+
+Taken from Chromium's own translations, which Chrome, Brave and Vivaldi use as they are. Edge and Opera translate parts of their interface separately, so their wording may differ slightly.
+
+| Language | Switch on Tampermonkey's details page (138+) | Before 138: on the extensions page |
+|---|---|---|
+| English (US) | Allow User Scripts | Developer mode |
+| English (UK) | Allow user scripts | Developer mode |
+| Español (España y Latinoamérica) | Permitir secuencias de comandos del usuario | Modo Desarrollador (España) · Modo de desarrollador (Latinoamérica) |
+| Català | Permet els scripts d'usuari | Mode de desenvolupador |
+| Français | Autoriser les scripts utilisateur | Mode développeur |
+| Deutsch | Nutzerscripts zulassen | Entwicklermodus |
+| Italiano | Consenti script utente | Modalità sviluppatore |
+| Português (Brasil) | Permitir scripts de usuário | Modo do desenvolvedor |
+| Português (Portugal) | Permitir scripts do utilizador | Modo de programador |
 
 ## How to use
 
@@ -108,7 +133,7 @@ Intraday timeframes are built from 15-minute or 1-hour candles and aligned to th
 
 | Problem | Solution |
 |---|---|
-| No badge appears | Check that *Allow User Scripts* / *Developer mode* is on (step 2) and that the script is enabled in the manager. Reload the page. |
+| No badge appears | Check that the user scripts switch (or *Developer mode* before version 138) is on, with the [name for your language](#name-of-the-switch-in-each-language) (step 2), and that the script is enabled in the manager. Reload the page. |
 | Red dot | Hover over the badge to read the error. If Tradesea changed its platform, update the script or [open an issue](https://github.com/xavieraijon/aijon-labs/issues). |
 | Amber dot | You are in *active* mode on a timeframe the script cannot read (seconds, or multiples such as 2D). Switch timeframe or mode. |
 | Too many rays | Untick timeframes, switch to *active* mode or lower *Max. age*. |
