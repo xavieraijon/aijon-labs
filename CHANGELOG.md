@@ -8,6 +8,21 @@ All notable changes to the plugins and userscripts of this repository. The forma
 
 Userscript for Tradesea (installed with Tampermonkey or Violentmonkey, not through Claude Code).
 
+### 1.6.0 — 2026-11-24
+
+#### Changed
+- Each chart now always shows the setups of its own timeframe, whatever it is (15m, 10H, 2D, 33D, 2W, 3M,
+  seconds…), read from the candles the chart itself draws. There is nothing to select any more: changing the
+  timeframe changes the ranges.
+- The list of timeframes becomes optional *extra timeframes* drawn on top (none by default). The *selected /
+  active timeframe* modes are gone; settings from 1.5 are migrated.
+- On multi-day charts the latest candle is only closed once all its trading days have ended (counted with the
+  feed's daily candles), and rays are anchored by trade date so they start on the right candle.
+- Recalculates every 15 seconds, and also when the chart finishes loading new data.
+
+#### Removed
+- The amber "unsupported timeframe" state: every time-based timeframe is supported.
+
 ### 1.5.0 — 2026-11-24
 
 #### Added

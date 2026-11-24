@@ -5,12 +5,12 @@
 <h1 align="center">Tradesea CRT</h1>
 
 <p align="center">
-  <strong>Candle Range Theory en tus gráficos de Tradesea, en cualquier temporalidad de 15 minutos a mensual y en tiempo real.</strong><br>
+  <strong>Candle Range Theory en tus gráficos de Tradesea, en la temporalidad que estés mirando (2D, 10H, 33D…) y en tiempo real.</strong><br>
   Un userscript gratuito de <a href="https://github.com/xavieraijon/aijon-labs">AijonLabs</a>.
 </p>
 
 <p align="center">
-  <img alt="versión" src="https://img.shields.io/badge/versión-1.5.0-2962FF">
+  <img alt="versión" src="https://img.shields.io/badge/versión-1.6.0-2962FF">
   <img alt="licencia" src="https://img.shields.io/badge/licencia-MIT-089981">
   <img alt="Tampermonkey" src="https://img.shields.io/badge/Tampermonkey-compatible-00485B">
   <img alt="Violentmonkey" src="https://img.shields.io/badge/Violentmonkey-compatible-1E88E5">
@@ -24,17 +24,15 @@
 
 ---
 
-Tradesea no permite añadir indicadores propios. **Tradesea CRT** añade el que echan de menos muchos traders de CRT: revisa las temporalidades que elijas, de **15 minutos a mensual**, encuentra los setups válidos de Candle Range Theory y dibuja su rango como **Horizontal Rays** directamente en tus gráficos. Los mantiene al día a medida que cierran las velas.
+Tradesea no permite añadir indicadores propios. **Tradesea CRT** añade el que echan de menos muchos traders de CRT: lee las velas de cada gráfico, **sea cual sea su temporalidad**, encuentra los setups válidos de Candle Range Theory y dibuja su rango como **Horizontal Rays** directamente en el gráfico. Los mantiene al día a medida que cierran las velas. No hay que elegir nada: cambias de temporalidad y los rangos cambian con ella.
 
 ## Características
 
-- **Cualquier temporalidad de 15m a M**: 15m, 30m, 1H, 2H, 3H, 4H, 6H, 8H, 12H, D, W y M. Elige un rango (*desde 15m hasta D*) o márcalas una a una. Las velas se alinean a la sesión de CME tal como las pinta Tradesea.
-- **Modo temporalidad activa**: sigue la temporalidad que tenga el gráfico, incluidas las que no están en la lista, como 5m o 45m.
-- **En tiempo real**: recalcula cada 30 segundos y al instante cuando cambias de símbolo o de temporalidad.
+- **Siempre la temporalidad del gráfico**: 15m, 4H, 10H, D, 2D, 33D, 2W, 3M, incluso segundos. Sin seleccionar nada: cambias de temporalidad y los setups la siguen. En gráficos divididos, cada uno usa su propia temporalidad y su símbolo.
+- **Temporalidades extra, si las quieres**: añade encima los rangos de 15m a M (por ejemplo, los de 4H y D mientras miras 15m) con un selector *Desde … hasta …*. Por defecto, ninguna.
+- **En tiempo real**: recalcula cada 15 segundos y al instante cuando cambias de símbolo o de temporalidad.
 - **Se limpia solo**: los setups completados o invalidados desaparecen sin que hagas nada.
 - **Visual claro**: un color de línea por temporalidad, etiqueta en verde (alcista) o rojo (bajista) y línea discontinua mientras la C2 sigue abierta.
-- **Dos modos**: todas las temporalidades seleccionadas, o solo la temporalidad activa del gráfico.
-- **Compatible con gráficos divididos**: cada gráfico muestra los setups de su propio símbolo.
 - **Interfaz ligera**: una pastilla que puedes arrastrar, con panel de ajustes en español o inglés según el idioma del navegador.
 - **Privado**: sin peticiones externas, sin rastreo y sin órdenes. Todo se ejecuta en tu navegador.
 
@@ -79,8 +77,8 @@ Sacado de las traducciones del propio Chromium, que Chrome, Brave y Vivaldi usan
 
 | Elemento | Qué hace |
 |---|---|
-| ● punto | Verde = funcionando · Ámbar = temporalidad no soportada en modo *activa* · Rojo = error (pasa el ratón para ver el detalle) · Gris = desactivado |
-| `CRT (todas) · 4 · 09:15` | Modo, número de setups dibujados y hora de la última actualización |
+| ● punto | Verde = funcionando · Rojo = error (pasa el ratón para ver el detalle) · Gris = desactivado |
+| `CRT (2D +2) · 4 · 09:15` | Temporalidades de los gráficos (+ número de temporalidades extra), setups dibujados y hora de la última actualización |
 | ↻ | Recalcular ahora (también recupera rayos borrados sin querer) |
 | ⚙ | Abrir los ajustes |
 | `off` / `on` | Desactivar el script (borra sus rayos) o volver a activarlo |
@@ -100,13 +98,14 @@ Cada setup dibuja dos rayos que empiezan en la vela C1: su **High** y su **Low**
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Color de línea | cian | verde claro | gris | azul | morado | naranja | marrón | verde azulado | rosa | índigo | pizarra | negro |
 
-Las temporalidades que no están en la lista (solo en modo *activa*, por ejemplo 5m o 45m) se dibujan en gris azulado.
+La temporalidad del propio gráfico usa el color de la lista si está en ella, y azul índigo si no (2D, 10H, 33D…).
 
 ### Ajustes
 
 | Ajuste | Por defecto | Descripción |
 |---|---|---|
-| Temporalidades | De 15m a D | Analiza las temporalidades que marques (*Desde … hasta …* marca un rango entero de golpe), o solo la activa del gráfico |
+| Temporalidad del gráfico | Siempre | Siempre se dibujan los setups de la temporalidad de cada gráfico, sea cual sea |
+| Temporalidades extra | Ninguna | Rangos de otras temporalidades (15m a M) dibujados encima; *Desde … hasta …* marca un rango entero de golpe y *Ninguna* los quita |
 | Activos (C2 cerrada) | Sí | Setups con la C2 ya cerrada que aún no han llegado a su objetivo |
 | En formación (C2 abierta) | Sí | Setups en los que la vela actual está barriendo C1 (todavía pueden fallar) |
 | Nivel 50 % | No | Añade un rayo punteado en la mitad de C1, el primer objetivo habitual |
@@ -127,7 +126,7 @@ Para cada par de velas consecutivas, **C1** (rango) y **C2**:
    - *(opcional, activado por defecto)* una vela posterior **cierra** fuera de C1 por el lado barrido.
 4. Se ignoran las velas que barren los dos extremos o ninguno.
 
-Las temporalidades intradía se construyen a partir de velas de 15 minutos o de 1 hora alineadas a la sesión CME Globex (18:00 hora de Nueva York); D y W son las propias velas de sesión de Tradesea, y M se construye a partir de ellas. Coinciden una a una con las velas de Tradesea.
+La temporalidad del gráfico usa las mismas velas que pinta el gráfico, así que siempre coinciden. Las temporalidades extra se construyen con el proveedor de datos: las intradía a partir de velas de 15 minutos o de 1 hora alineadas a la sesión CME Globex (18:00 hora de Nueva York), D y W con las propias velas de sesión de Tradesea, y M a partir de las diarias.
 
 ## Solución de problemas
 
@@ -135,14 +134,13 @@ Las temporalidades intradía se construyen a partir de velas de 15 minutos o de 
 |---|---|
 | No aparece la pastilla | Comprueba que *Permitir secuencias de comandos del usuario* (o el *Modo Desarrollador* antes de la versión 138) esté activado (paso 2; en otros idiomas, [ver la tabla](#nombre-del-interruptor-en-cada-idioma)) y que el script esté habilitado en el gestor. Recarga la página. |
 | Punto rojo | Pasa el ratón por la pastilla para ver el error. Si Tradesea ha cambiado su plataforma, actualiza el script o [abre una incidencia](https://github.com/xavieraijon/aijon-labs/issues). |
-| Punto ámbar | Estás en modo *activa* con una temporalidad que el script no puede leer (segundos, o múltiplos como 2D). Cambia de temporalidad o de modo. |
-| Demasiados rayos | Desmarca temporalidades, cambia al modo *activa* o baja la *Antigüedad máx.* |
+| Demasiados rayos | Quita las temporalidades extra (⚙ → *Ninguna*) o baja la *Antigüedad máx.* |
 | La pastilla no se ve | ⚙ → *Restablecer posición*, o cambia el tamaño de la ventana. |
 
 ## Limitaciones
 
-- No admite temporalidades en segundos ni múltiplos de periodo (2D, 3W…). Las inferiores a 15m solo funcionan en modo *activa*.
-- Cada temporalidad mira un histórico limitado (unos 10 días de mercado en 15m/30m, 6 semanas en las horarias y 3 años en D/W/M), más que suficiente para la *Antigüedad máx.* por defecto de 30 velas.
+- En gráficos de ticks, de rango u otros que no son de tiempo, la última vela se considera siempre en formación.
+- La temporalidad del gráfico mira tan atrás como velas tenga cargadas el gráfico. Las temporalidades extra miran unos 10 días de mercado (15m/30m), 6 semanas (horarias) y 3 años (D/W/M), más que suficiente para la *Antigüedad máx.* por defecto de 30 velas.
 - Tradesea no ofrece una API pública para complementos. El script usa la interfaz interna del gráfico, así que una actualización de la plataforma puede romperlo hasta que salga una versión nueva.
 - Los rayos son dibujos normales del gráfico. Si guardas tu layout, Tradesea puede conservar una copia; el script limpia y vuelve a dibujar sus propios rayos al cargar.
 

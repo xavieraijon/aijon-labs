@@ -42,7 +42,7 @@ Claude Code: pulsas *Instalar*, confirmas y se actualizan solas desde este repos
 
 | Userscript | Qué hace | Funciona en | Para empezar |
 |---|---|---|---|
-| [`tradesea-crt`](userscripts/tradesea-crt/README.es.md) | Encuentra los setups de Candle Range Theory (CRT) en las temporalidades que elijas, de 15 minutos a mensual, y dibuja su rango como Horizontal Rays en tus gráficos, en tiempo real: los setups completados o invalidados desaparecen solos | [Tradesea](https://app.tradesea.ai) en Chrome, Edge o Firefox | [Instalar](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js) · [README](userscripts/tradesea-crt/README.es.md) |
+| [`tradesea-crt`](userscripts/tradesea-crt/README.es.md) | Encuentra los setups de Candle Range Theory (CRT) en la temporalidad que tenga tu gráfico (2D, 10H, 33D…), y si quieres en otras, y dibuja su rango como Horizontal Rays en tus gráficos, en tiempo real: los setups completados o invalidados desaparecen solos | [Tradesea](https://app.tradesea.ai) en Chrome, Edge o Firefox | [Instalar](https://raw.githubusercontent.com/xavieraijon/aijon-labs/main/userscripts/tradesea-crt/tradesea-crt.user.js) · [README](userscripts/tradesea-crt/README.es.md) |
 
 Versiones y cambios: [CHANGELOG](CHANGELOG.md) (en inglés) y
 [releases](https://github.com/xavieraijon/aijon-labs/releases) (etiquetas `<plugin>-v<versión>`).
