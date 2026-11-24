@@ -21,6 +21,8 @@ Userscript for Tradesea (installed with Tampermonkey or Violentmonkey, not throu
   trading day).
 - The data feed is only asked for the resolutions the selected timeframes need; D and W are refreshed at most
   once a minute.
+- Installation guide: exact name of the *Allow User Scripts* switch (and *Developer mode*) in each language and
+  browser, with direct links to Tampermonkey's details page.
 
 ### 1.4.0 — 2026-11-24
 
