@@ -11,5 +11,10 @@
   distinto de 0 en caso de error, y `--help` útil. Se invocan con `python3 -I` (no cargan código de la carpeta actual).
 - **Nada personal en el repo:** ni IPs, dominios, uuids, correos ni secretos. Los datos de cada usuario van en
   `~/.config/<plugin>/` (o `${CLAUDE_PLUGIN_DATA}` si no hace falta editarlos a mano).
+- **Userscripts** en `userscripts/<nombre>/<nombre>.user.js`: un solo archivo de JavaScript, sin dependencias, sin
+  peticiones de red propias y sin código remoto. Su `@version` sigue semver y sube con cada cambio publicado (con su
+  entrada en `CHANGELOG.md`); `@updateURL` y `@downloadURL` apuntan al archivo en bruto de `main`, así que a los
+  usuarios solo les llega un cambio cuando se fusiona. Textos de la interfaz en inglés y castellano, según el
+  idioma del navegador.
 - **Tests** con pytest en `plugins/<nombre>/tests/`, sin red: las APIs, ssh y Docker se simulan con `monkeypatch`.
 - **Antes de publicar:** `ruff check .`, `pytest -q plugins` y `claude plugin validate . --strict`.
